@@ -8,12 +8,25 @@ And it doesn't fire. There are no shots. It's **on**, and while it's on it burns
 
 | | |
 |---|---|
-| ![](docs/beam-cyan.png) | ![](docs/beam-green.png) |
-| ![](docs/beam-gold.png) | ![](docs/beam-magenta.png) |
+| ![](docs/beam-cyan.png) | ![](docs/beam-aqua.png) |
+| ![](docs/beam-green.png) | ![](docs/beam-yellow.png) |
+| ![](docs/beam-gold.png) | ![](docs/beam-amber.png) |
+| ![](docs/beam-violet.png) | ![](docs/beam-magenta.png) |
 
 *Shot on desktop, where the gun is a screen overlay with no world position, so
 the muzzle has to be guessed at. In VR it comes out of the barrel — the tracked
 controller is a real point in the world, nothing to guess.*
+
+---
+
+## Coming
+
+- **A proper beam sound.** It currently borrows a looping plasma tone. A held
+  beam wants one continuous voice that rises with the heat, not a loop.
+- **The VR mega-beam.** Bring both hands together and the two Lances merge into
+  one unified beam fired from the point between them. Only possible in VR,
+  because it needs two real tracked positions — and it's a physical input, no
+  button.
 
 ---
 
