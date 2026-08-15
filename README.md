@@ -33,19 +33,34 @@ controller is a real point in the world, nothing to guess.*
 
 ## It gets stronger when you find more of it
 
-**2% of dead humanoids drop a Lance core.**
+**You start with a Lance in each hand.** Both trace the same aim, so on a single
+target you are doing double the rate below.
 
-- **First one** → a second Lance, in your off hand. Dual wield. *And* a tier.
-- **Every one after** → another tier, up to seven.
+Dead humanoids drop Lance cores, and cores buy **tier** — the rate both guns
+fire at. They arrive on a curve that starts generous and tightens:
 
-You start with one gun at tier 1: a flat blue beam, 60 DPS, no gear changes.
-A tier-7 Lance climbs six gear changes in a single trigger pull and tops out at
-**900 DPS**, blue through green and gold to magenta.
+| cores held | drop chance | ≈ kills |
+|---|---|---|
+| 1 | 12% | 8 |
+| 2 | 7% | 14 |
+| 3 | 4% | 25 |
+| 4 | 2.2% | 45 |
+| 5 | 1.2% | 83 |
+| 6 | 0.6% | 166 |
+| 7 | — | nothing drops; there's nothing left to buy |
 
-The tier doesn't raise your floor — **it raises your ceiling.** Every pull still
-starts cold, blue, at 60. What the tier buys is how many rungs that same
-ten-second climb passes through. An upgrade changes the *shape* of a burst, not
-where it begins.
+About 340 kills end to end. The first lands in your lap; the last is a grind you
+can feel. In co-op the roll reads *your* tier, so being behind doesn't punish you.
+
+A tier-1 Lance is a flat blue beam at 3.3 DPS — six seconds to cook a zombieman
+on one gun, three on both. A tier-7 Lance opens at **60** and climbs six gear
+changes inside one trigger pull to **150**, blue through green and gold to
+magenta.
+
+The tier doesn't just raise your ceiling, it raises the floor with it: a tier-7
+gun hits harder cold than a tier-1 gun ever does hot. What the climb still buys
+is the *shape* of a burst — how many rungs that same ten-second hold passes
+through.
 
 Seeing magenta at all means someone is carrying a fully built Lance.
 

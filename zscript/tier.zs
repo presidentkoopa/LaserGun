@@ -55,19 +55,15 @@ class LNC_LanceCore : CustomInventory
 		Inventory.PickupMessage "";   // set per-case in TryPickup
 	}
 
-	// SLOW SPIN. MODELDEF can place a model and lay it on its side but has no
-	// way to animate a rotation, so the turn is done here. Two degrees a tic
-	// is a full revolution every six seconds -- unmistakably moving, never
-	// distracting, and it catches the light on a different face as it goes.
+	// NO SPIN. There was a two-degree-a-tic turn here to catch the light and
+	// keep the core from reading as scenery, but the Bolter mesh is not
+	// centred on its origin -- so turning the actor swung the whole gun round
+	// in a wide circle instead of rotating it in place, which looks like a
+	// bug rather than an item. FLOATBOB alone is enough to mark it as
+	// something to pick up.
 	//
-	// Combined with FLOATBOB it reads as an item rather than as scenery,
-	// which matters for something that drops 2% of the time and must not be
-	// walked past.
-	override void Tick()
-	{
-		Super.Tick();
-		angle += 2.0;
-	}
+	// If it ever wants to turn again, the fix is a centred pivot on the mesh
+	// or a MODELDEF offset, not an angle on the actor.
 
 	States
 	{

@@ -298,18 +298,24 @@ class LNC_Lance : Weapon
 	// bosses without needing a second system to do it.
 	// THE BASE RATE, SET BY TIER. What the gun does cold.
 	//
-	// ANCHORED AT BOTH ENDS from watching it play: a zombieman is 20hp and
-	// should take about six seconds at tier 1 and about a third of a second
-	// at tier 7.
+	// THE ANCHOR IS ONE GUN ON A ZOMBIEMAN AT TIER 1: six seconds. 20hp over
+	// six seconds is 3.3, and everything else scales up from there.
 	//
-	// THESE ARE PER GUN AND YOU HAVE TWO. Both hands trace the same aim, so
-	// on a single target the rate that matters is double what is listed here
-	// -- which is why the table reads 1.65 at the bottom rather than 3.3. The
-	// numbers were set for one gun first and then halved when dual wield
-	// became the starting kit, or the anchors would have been hit at half the
-	// intended time. 20 / (2 x 1.65) is six seconds; 20 / (2 x 30) is a third.
+	// Seven rungs, geometric at about x1.62 each, so no tier is a dead step
+	// and the top is roughly eighteen times the bottom.
 	//
-	// Seven rungs, geometric at about x1.62, so no tier is a dead step.
+	//     tier   DPS     one gun    both guns
+	//     1       3.3    6.1 s      3.0 s
+	//     2       5.4    3.7 s      1.9 s
+	//     3       8.7    2.3 s      1.1 s
+	//     4      14.0    1.4 s      0.7 s
+	//     5      23.0    0.9 s      0.4 s
+	//     6      37.0    0.5 s      0.3 s
+	//     7      60.0    0.33 s     0.17 s
+	//
+	// PER GUN, and both hands trace the same aim -- so on a single target the
+	// rate is double the column above. That is the point of the second Lance
+	// and it is not meant to be cancelled out here.
 	//
 	// IT USED TO BE INDEXED BY BAND ALONE, and that could not express this.
 	// A band comes from heat, heat starts at zero, so a tier-7 gun opened
@@ -321,13 +327,13 @@ class LNC_Lance : Weapon
 	{
 		switch (Tier())
 		{
-			case 1:  return 1.65;
-			case 2:  return 2.70;
-			case 3:  return 4.35;
-			case 4:  return 7.00;
-			case 5:  return 11.50;
-			case 6:  return 18.50;
-			default: return 30.00;
+			case 1:  return 3.3;
+			case 2:  return 5.4;
+			case 3:  return 8.7;
+			case 4:  return 14.0;
+			case 5:  return 23.0;
+			case 6:  return 37.0;
+			default: return 60.0;
 		}
 	}
 

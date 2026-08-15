@@ -48,5 +48,7 @@ jobs:
             doomxr.exe -iwad doom2.wad -file RS_Lance.pk3
             ```
 
-            Pick the **Laser Marine** class to start with one, or find one — 2% of
-            dead humanoids drop a core. The first core you find is your second gun.
+            Pick the **Laser Marine** class to start with a Lance in each hand.
+            Cores drop from dead humanoids and buy tier — the rate both guns fire
+            at — on a curve that starts generous and tightens, from 12% down to
+            0.6% as you collect them.

@@ -60,12 +60,12 @@ Model LNC_LanceCore
 	Path "models/Bolter"
 	Model 0 "Bolter.md3"
 	Skin 0 "bolter.png"
-	// SCALE 1.4, bigger than the 1.1 the held versions use. A weapon in your
-	// hands fills the screen and wants restraining; the same mesh lying on a
-	// floor twenty metres away is a few pixels tall and wants the opposite.
-	// This is the number to change if it reads wrong -- nothing else here
-	// affects how big it looks.
-	Scale 1.4 1.4 1.4
+	// SCALE 0.7 -- half of the 1.4 this used to be. The larger figure was
+	// reasoning about a core seen across a room, but in practice you meet it
+	// at your feet, where 1.4 was a rifle the size of a body lying on the
+	// floor. This is the number to change if it reads wrong; nothing else
+	// here affects how big it looks.
+	Scale 0.7 0.7 0.7
 	ZOffset 0
 	RollOffset 90
 	FrameIndex PLAS A 0 0
