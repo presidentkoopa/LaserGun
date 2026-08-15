@@ -185,12 +185,20 @@ class LNC_Lance : Weapon
 		Weapon.SelectionOrder 1080;
 		Weapon.SlotNumber 6;
 
-		// NO AMMO, AT ALL. Not zero-cost ammo -- no ammo type. Heat is the
-		// only thing that stops you firing, which is what makes it the only
-		// thing worth thinking about.
+		// NO AMMO -- AND THE AMMO COUNTER IS THE HEAT GAUGE.
+		//
+		// There is an ammo TYPE, but nothing is ever spent: AmmoUse is 0 and
+		// AMMO_OPTIONAL lets it fire at zero. The type exists purely so the
+		// stock HUD has something to print, and DoEffect drives that number
+		// straight from heat. That buys a readout on every status bar, every
+		// alt-HUD and every third-party HUD in existence for no HUD code at
+		// all -- they all already know how to show ammo.
+		//
+		// AmmoGive1 IS 0 on purpose. Picking the weapon up must not hand you
+		// a hundred heat.
 		Weapon.AmmoUse 0;
 		Weapon.AmmoGive1 0;
-		Weapon.AmmoType1 "";
+		Weapon.AmmoType1 "LNC_Heat";
 
 		Inventory.PickupMessage "You got the Lance!";
 		Inventory.Icon "PLASA0";   // Vanilla, matching MeatGrinder -- its PlasmaThrower spawns as PLAS A (weapons.txt:563), so the Bolter never had a custom pickup sprite by design. The WORLD drop still wears the Bolter model bound to that same PLAS A frame (MODELDEF), so what lies on the floor is the gun itself.
@@ -1025,6 +1033,31 @@ class LNC_Lance : Weapon
 			if (!stillUp) Release(owner);
 		}
 
+		// THE COUNTER. See the Default block for why heat is an ammo type at
+		// all: it means every status bar, alt-HUD and third-party HUD ever
+		// written already knows how to display it.
+		//
+		// ONLY THE READY WEAPON WRITES IT. The HUD prints the ready weapon's
+		// ammo and the two hands hold separate heat, so if both wrote, the
+		// number would flicker between two pools. The mainhand owns it; the
+		// offhand's heat is read off its beam colour like everything else.
+		//
+		// CLAMPED TO 99, NOT 100. Cook-off happens AT 100, so a counter able
+		// to show it would be displaying a number you can never fire at. 99
+		// is the last value that still means "you may pull the trigger", and
+		// the overheat state says the rest -- which is also why the readout
+		// sits at 99 for the whole lockout rather than counting anything.
+		if (owner && owner.player && owner.player.ReadyWeapon == self)
+		{
+			let h = owner.FindInventory("LNC_Heat");
+			if (!h)
+			{
+				owner.A_GiveInventory("LNC_Heat", 1);
+				h = owner.FindInventory("LNC_Heat");
+			}
+			if (h) h.Amount = min(HeatPercent(), 99);
+		}
+
 		if (lockTics > 0)
 		{
 			lockTics--;
@@ -1109,6 +1142,42 @@ class LNC_Lance : Weapon
 		Goto Ready;
 	}
 }
+
+// =====================================================================
+// LNC_Heat -- the heat gauge, wearing an ammo type's clothes.
+//
+// NOTHING EVER SPENDS THIS. AmmoUse is 0 and AMMO_OPTIONAL lets the Lance
+// fire at zero, so this is not a resource -- it is a display. LNC_Lance's
+// DoEffect assigns Amount straight from HeatPercent() every tic.
+//
+// WHY AN AMMO TYPE RATHER THAN A HUD ELEMENT. A custom readout means drawing
+// it, which means owning a position, a font and a scale on the status bar,
+// the alt-HUD, the fullscreen HUD and whatever HUD the player has actually
+// installed -- and being wrong on three of them. Every one of those already
+// knows how to print the ready weapon's ammo. Borrowing that costs one class
+// and one line a tic, and it is correct everywhere by construction.
+//
+// MaxAmount 99: cook-off is at 100, so 99 is the highest number you can
+// still fire at. See DoEffect for the argument.
+//
+// UNDROPPABLE and UNTOSSABLE so it can never be thrown away, and
+// IGNORESKILL so a skill's ammo multiplier does not scale a temperature.
+class LNC_Heat : Ammo
+{
+	Default
+	{
+		Inventory.Amount 0;
+		Inventory.MaxAmount 99;
+		Ammo.BackpackAmount 0;
+		Ammo.BackpackMaxAmount 99;
+		Inventory.Icon "";
+		Tag "Heat";
+		+INVENTORY.UNDROPPABLE
+		+INVENTORY.UNTOSSABLE
+		+INVENTORY.IGNORESKILL
+	}
+}
+
 
 // The offhand copy. Same weapon; the flag is what puts it in the other hand,
 // which in turn is what BeamSlot() reads to claim beam slot 1. Its heat is

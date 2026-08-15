@@ -70,7 +70,18 @@ Ten seconds of held fire before it cooks off. Release and it drops back to cold
 in about three. Cook off and you're locked out for five seconds and come back
 **stone cold** — an overheat costs the whole climb, not just the wait.
 
-Each hand has its own heat. They never heat each other.
+There's a 0.23s grace before cooling starts, so tapping doesn't dump heat, and
+heat is *not* reset when you release. You keep the rung you climbed to. That's
+the technique: pulse the trigger to live high on the ladder without ever
+touching 100.
+
+**The ammo counter is the heat gauge** — 0 to 99, where 99 is the last number
+you can still fire at. It's a real ammo type that nothing ever spends, which
+means your status bar, the alt-HUD and any HUD mod you've installed all show it
+without knowing anything about this weapon.
+
+Each hand has its own heat. They never heat each other. The counter shows the
+mainhand; read the offhand off its beam colour.
 
 **Fodder dies in the bottom band**, so clearing a room costs almost no heat —
 the gun is still cold when the room is empty. **A Baron can't be killed in the
