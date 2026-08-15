@@ -103,9 +103,14 @@ class LNC_Lance : Weapon
 	int flashTics;
 
 	// ---- the heat model, all of it -------------------------------------
+	// SLOWED 2026-08-14 on the owner's call: "have it last longer, make it
+	// take longer to get to the higher levels of damage without dying on
+	// me." Was 25/sec, cooking off in four; now 10/sec, so ten full seconds
+	// of hold and two whole seconds in every band. The climb becomes
+	// something you commit to across a fight rather than a sprint.
 	const LNC_HEAT_MAX  = 100.0;
-	const LNC_HEAT_RISE = 25.0;    // per second firing -> 4.0s cold to max
-	const LNC_HEAT_FALL = 12.5;    // per second idle   -> 8.0s max to cold
+	const LNC_HEAT_RISE = 10.0;    // per second firing -> 10.0s cold to max
+	const LNC_HEAT_FALL = 8.0;     // per second idle   -> 12.5s max to cold
 	const LNC_LOCKOUT   = 175;     // tics -- a flat 5.0 seconds
 
 	const LNC_RANGE     = 2200.0;
@@ -179,13 +184,17 @@ class LNC_Lance : Weapon
 	// bosses without needing a second system to do it.
 	double DPS() const
 	{
+	// RESCALED with the slower climb: a hold is now ten seconds rather than
+	// four, so the per-band rates come down or a full burn would delete a
+	// Cyberdemon on its own. Full burn is ~2240 damage, of which the top
+	// band alone is 1000.
 		switch (Band())
 		{
-			case 0:  return 80.0;
-			case 1:  return 140.0;
-			case 2:  return 240.0;
-			case 3:  return 420.0;
-			default: return 750.0;
+			case 0:  return 60.0;
+			case 1:  return 100.0;
+			case 2:  return 170.0;
+			case 3:  return 290.0;
+			default: return 500.0;
 		}
 	}
 
@@ -279,16 +288,39 @@ class LNC_Lance : Weapon
 	// Blue to cyan to white is "cold and building"; gold to furnace-red is
 	// "this is about to cost you". The core carries the heat, and the helix
 	// carries the contrast against it.
+	static Color HueCol(double h, double sat, double val)
+	{
+		h -= floor(h);
+		double i = floor(h * 6.0);
+		double f = h * 6.0 - i;
+		double p = val * (1.0 - sat);
+		double q = val * (1.0 - sat * f);
+		double t = val * (1.0 - sat * (1.0 - f));
+		double r, g, b;
+		int seg = int(i) % 6;
+		if      (seg == 0) { r = val; g = t;   b = p;   }
+		else if (seg == 1) { r = q;   g = val; b = p;   }
+		else if (seg == 2) { r = p;   g = val; b = t;   }
+		else if (seg == 3) { r = p;   g = q;   b = val; }
+		else if (seg == 4) { r = t;   g = p;   b = val; }
+		else               { r = val; g = p;   b = q;   }
+		return Color(255, int(r * 255), int(g * 255), int(b * 255));
+	}
+
+	// ONE HUE FOR THE WHOLE WEAPON, drifting slowly.
+	//
+	// SLOW, not fast. A quick cycle makes a solid bar look like it is
+	// flickering or strobing, which reads as instability rather than as
+	// colour -- the beam stops looking like one object. A slow drift lets
+	// the beam be unmistakably SOLID at any instant while still never
+	// sitting on one colour.
+	//
+	// Saturation falls as it heats, so the top band runs pale and hot rather
+	// than merely a different hue.
 	Color CoreColor() const
 	{
-		switch (Band())
-		{
-			case 0:  return 0x1E6BFF;   // deep electric blue
-			case 1:  return 0x00E5FF;   // cyan
-			case 2:  return 0xEAFFFF;   // hard white, faintly cold
-			case 3:  return 0xFFD21E;   // gold
-			default: return 0xFF3C00;   // furnace
-		}
+		return LNC_Lance.HueCol(Level.maptime * 0.006,
+			0.92 - 0.30 * Charge(), 1.0);
 	}
 
 	// Deliberately NOT a lighter version of the core. The spiral should be a
@@ -296,16 +328,18 @@ class LNC_Lance : Weapon
 	// chords read as separate at speed is if they are a different colour.
 	// The top band's magenta on furnace-red is the loudest thing the weapon
 	// ever does, which is correct: it is also the most dangerous.
+	// THE SAME HUE AS THE CORE, only paler.
+	//
+	// It used to be the complement -- magenta over furnace-red and so on --
+	// on the theory that contrast would make the spiral read as a separate
+	// object. It did, and that was the bug: it looked like two unrelated
+	// weapons firing down the same line rather than one beam with a filament
+	// wound round it. A small hue offset and a lift toward white keeps it
+	// legible against the core while staying obviously part of it.
 	Color HelixColor() const
 	{
-		switch (Band())
-		{
-			case 0:  return 0x9FD8FF;   // pale blue
-			case 1:  return 0xC8FFF4;   // pale aqua
-			case 2:  return 0xFFE79A;   // warm gold against the white core
-			case 3:  return 0xFF7A18;   // orange against gold
-			default: return 0xFF00B4;   // magenta against furnace
-		}
+		return LNC_Lance.HueCol(Level.maptime * 0.006 + 0.06,
+			0.45 - 0.20 * Charge(), 1.0);
 	}
 
 	// ---- the beam ------------------------------------------------------
@@ -486,18 +520,35 @@ class LNC_Lance : Weapon
 		// cooking off should be.
 		if (band > 0)
 		{
-			// Spin is in degrees per tic and steps hard with the band, so
-			// gearing up is audible in the eye as well: the whole spiral
-			// jumps to a new speed.
-			double spin  = Level.maptime * (7.0 + 5.0 * step);
-			double radius = 1.8 + 1.15 * step + 3.0 * flash;
-			double turns  = 0.85 + 0.30 * step;
+			// TURNS BELOW 1, AND THIS IS THE WHOLE FIX FOR "IT LOOKS LIKE A
+			// GATLING LASER".
+			//
+			// Three chords is all the slot budget allows per hand. At 0.85+
+			// turns each chord sweeps 100-140 degrees, and a chord that wide
+			// is not an arc -- it is a straight bar. Three straight bars
+			// rotating about an axis is a spinning triangle, which is exactly
+			// what a gatling barrel looks like. The faceting WAS the effect.
+			//
+			// At 0.55 turns each chord spans about 66 degrees, which is
+			// shallow enough to read as a curve, and the polyline reads as
+			// one filament winding round the core instead of three separate
+			// beams chasing each other.
+			double turns = 0.55;
+
+			// AND IT HAS TO HUG. A wide orbit separates the filament from the
+			// core and they stop being one object; kept close, the spiral is
+			// a texture ON the beam rather than something orbiting it.
+			double radius = 1.1 + 0.45 * step + 1.2 * flash;
+
+			// Slower, too. Fast rotation on a coarse polyline is what makes
+			// the facets legible in the first place.
+			double spin = Level.maptime * (2.6 + 1.4 * step);
 
 			w.DrawHelix(drawFrom, to, radius, turns, spin,
 				LNC_Lance.LerpCol(w.HelixColor(), 0xFFFFFF, flash),
-				0.45 + 0.22 * step,               // thin: it is a filament
-				0.70 + 0.45 * step + 1.2 * flash, // but it glows generously
-				0.30 + 0.14 * step + 0.5 * flash);
+				0.32 + 0.14 * step,               // thin: it is a filament
+				0.55 + 0.30 * step + 1.0 * flash, // but it glows generously
+				0.26 + 0.11 * step + 0.5 * flash);
 		}
 		else
 		{
