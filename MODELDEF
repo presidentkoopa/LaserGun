@@ -70,3 +70,8 @@ Model LNC_LanceCore
 	RollOffset 90
 	FrameIndex PLAS A 0 0
 }
+
+// THE WHIP HANDLE. No model -- it is a sprite, and deliberately so: the
+// whip itself is the weapon and the grip only has to be somewhere for it
+// to come out of. Offset so the emitter end points AWAY from the hand,
+// which is the end the lash is drawn from.

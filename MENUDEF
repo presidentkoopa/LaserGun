@@ -1,0 +1,23 @@
+// One toggle. See CVARINFO for what used to be here and why it is not.
+OptionValue "LNCProgression"
+{
+	0, "Heat only (original)"
+	1, "Find cores to raise the ceiling"
+}
+
+AddOptionMenu "OptionsMenu"
+{
+	Submenu "Laser Arsenal", "LNCOptions"
+}
+
+OptionMenu "LNCOptions"
+{
+	Title "Laser Arsenal"
+	StaticText ""
+	StaticText "Lance / Lash progression", gold
+	Option "Mode", "lnc_progression", "LNCProgression"
+	StaticText ""
+	StaticText "Heat drives the climb either way. This only sets", darkgray
+	StaticText "whether the ceiling is fixed at the top rung or", darkgray
+	StaticText "raised by the cores you find.", darkgray
+}

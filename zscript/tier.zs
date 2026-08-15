@@ -125,7 +125,16 @@ class LNC_LanceCore : CustomInventory
 			// THE SECOND GUN. Seated into the offhand here rather than left
 			// in the backpack -- an offhand weapon that has to be manually
 			// selected reads as not having been given at all.
+			//
+			// THIS TAKES THE LASH'S HAND. Both are offhand weapons and there
+			// is only one offhand, so seating the second Lance displaces the
+			// whip. That is the right default -- the second gun is the power
+			// spike and doubles your damage on a single target -- but it must
+			// not happen silently, or a whip that was hanging there a moment
+			// ago has simply vanished with no explanation. Hence the second
+			// line: the Lash is not gone, it is in the other pocket.
 			A_GiveInventory("LNC_LanceOffhand", 1);
+			bool hadLash = CountInv("LNC_Whip") > 0;
 			if (player)
 			{
 				let off = Weapon(FindInventory("LNC_LanceOffhand"));
@@ -134,6 +143,8 @@ class LNC_LanceCore : CustomInventory
 			A_Print(String.Format(
 				"SECOND LANCE -- dual wield, tier %d of %d",
 				after, LNC_Lance.LNC_MAX_TIER));
+			if (hadLash)
+				A_Print("The Lash is stowed -- slot 6 to bring it back");
 			return;
 		}
 
@@ -150,7 +161,8 @@ class LNC_LanceCore : CustomInventory
 
 
 // ---------------------------------------------------------------------
-// LNC_DropHandler -- 2% of dead humanoids leave a Lance core.
+// LNC_DropHandler -- dead humanoids leave a Lance core, less and less often
+// the more of them you are carrying. See DropPermille for the curve.
 //
 // WHY A HANDLER RATHER THAN DropItem. DropItem has to be declared on each
 // monster class, which means editing every humanoid in whatever mod is
@@ -174,16 +186,67 @@ class LNC_LanceCore : CustomInventory
 // ---------------------------------------------------------------------
 class LNC_DropHandler : EventHandler
 {
-	// Two percent, as asked. Rolled per kill out of 1000 rather than 100 so
-	// the number can be tuned in tenths without changing the code shape.
-	const LNC_DROP_PERMILLE = 20;
+	// HOW LIKELY A CORE IS, GIVEN HOW MANY YOU ALREADY HAVE. Per mille, so it
+	// tunes in tenths of a percent without changing the shape of the code.
+	//
+	// IT FALLS AWAY HARD, AND THAT IS THE POINT. A flat rate makes every rung
+	// cost the same, which means the first one is a chore and the last one is
+	// a formality -- the curve is the progression, not the numbers on it. The
+	// first core should feel like it merely happened to you; the last should
+	// be something you can feel yourself grinding toward. Roughly halving at
+	// each step gives that without any single step reading as a wall:
+	//
+	//     have   chance    ~kills     what it feels like
+	//     1      12.0%     8          you barely had to try
+	//     2       7.0%     14
+	//     3       4.0%     25
+	//     4       2.2%     45         the halfway wall
+	//     5       1.2%     83
+	//     6       0.6%     166        the last rung, and it should hurt
+	//     7       never    --         nothing left to buy
+	//
+	// About 340 kills end to end: an episode, not a map.
+	//
+	// NOTHING DROPS AT MAX TIER. A pickup that cannot do anything is worse
+	// than no pickup -- it teaches you to stop reading them.
+	static int DropPermille(int held)
+	{
+		switch (held)
+		{
+			case 1:  return 120;
+			case 2:  return 70;
+			case 3:  return 40;
+			case 4:  return 22;
+			case 5:  return 12;
+			case 6:  return 6;
+			default: return 0;
+		}
+	}
+
+	// WHOSE LADDER DECIDES THE ODDS -- the killer's, so in co-op the player
+	// who is behind keeps their own better rate instead of being throttled by
+	// whoever is furthest ahead.
+	//
+	// Falls back to 1, the most generous rate, when the killer cannot be
+	// identified. That is the right failure direction: the cost of guessing
+	// wrong is a slightly early core, not a mechanic that quietly stops.
+	private int CoresHeld(Actor victim)
+	{
+		let killer = victim.target;
+		if (killer && killer.player)
+			return clamp(killer.CountInv("LNC_LanceTier"), 1, LNC_Lance.LNC_MAX_TIER);
+		return 1;
+	}
 
 	override void WorldThingDied(WorldEvent e)
 	{
 		let victim = e.Thing;
 		if (!victim || !victim.bIsMonster) return;
 		if (!IsHumanoid(victim)) return;
-		if (Random(1, 1000) > LNC_DROP_PERMILLE) return;
+
+		int chance = DropPermille(CoresHeld(victim));
+		if (chance <= 0) return;                       // maxed: nothing to buy
+		if (Random(1, 1000) > chance) return;
 
 		// Spawned a little above the corpse so it does not end up inside the
 		// floor on sloped or raised geometry, and given a small upward hop so

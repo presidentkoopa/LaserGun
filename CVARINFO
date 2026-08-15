@@ -1,0 +1,15 @@
+// ---------------------------------------------------------------------
+// ONE TOGGLE.
+//
+// This was two axes making four modes, the second being what the buckler
+// did with damage it stopped. The buckler is gone, so the shield mode and
+// the battery tuning went with it rather than being left as dead settings
+// that no longer drive anything.
+// ---------------------------------------------------------------------
+
+// 0 = THE ORIGINAL. Hold the trigger and the whole seven-rung ladder is
+//     available from heat alone. No pickups, no ceiling -- the repo's
+//     first behaviour, the one in the screenshots.
+// 1 = FIND CORES. Heat still drives the climb, but how far it can climb is
+//     your tier, and tiers come from the 2% drop.
+user int lnc_progression = 1;

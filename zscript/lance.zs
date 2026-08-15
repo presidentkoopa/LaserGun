@@ -228,10 +228,43 @@ class LNC_Lance : Weapon
 	//
 	// Starts at 1: one colour, one damage rate, a flat beam. Every Lance
 	// picked up afterwards adds a rung, to a maximum of LNC_MAX_TIER.
+	// ---- THE ARSENAL'S POWER, IN ONE PLACE -------------------------------
+	//
+	// Read by the Lance and the Lash alike, so the two weapons always show
+	// the same colour for the same strength. "Same colours means stronger"
+	// only works if there is one number behind it.
+	//
+	// Three inputs, in order:
+	//
+	//   1. THE MODE. lnc_progression 0 is the original -- the whole ladder
+	//      available from heat alone, no pickups, which is the behaviour in
+	//      the repo's screenshots. 1 gates the ceiling behind found cores.
+	//
+	//   2. THE TIER, from cores, when that mode is on.
+	//
+	// There was a third input here -- a battery fed by a buckler that absorbed
+	// what it stopped, which bought temporary rungs. The buckler is gone, and
+	// the battery went with it rather than being left as a source with nothing
+	// feeding it.
+	static clearscope int ArsenalTier(Actor holder)
+	{
+		if (!holder) return 1;
+
+		if (LNC_Lance.ModeProgression() == 0)
+			return LNC_MAX_TIER;                       // the original: all of it
+
+		return clamp(holder.CountInv("LNC_LanceTier"), 1, LNC_MAX_TIER);
+	}
+
+	static clearscope int ModeProgression()
+	{
+		let cv = CVar.GetCVar("lnc_progression");
+		return cv ? cv.GetInt() : 1;
+	}
+
 	clearscope int Tier() const
 	{
-		if (!owner) return 1;
-		return clamp(owner.CountInv("LNC_LanceTier"), 1, LNC_MAX_TIER);
+		return LNC_Lance.ArsenalTier(owner);
 	}
 
 	// THE HEAT BAR IS SUBDIVIDED BY TIER, NOT CAPPED BY IT.
@@ -263,25 +296,55 @@ class LNC_Lance : Weapon
 	//
 	// x1.75 per rung. See the header for why this shape splits fodder from
 	// bosses without needing a second system to do it.
+	// THE BASE RATE, SET BY TIER. What the gun does cold.
+	//
+	// ANCHORED AT BOTH ENDS from watching it play: a zombieman is 20hp and
+	// should take about six seconds at tier 1 and about a third of a second
+	// at tier 7.
+	//
+	// THESE ARE PER GUN AND YOU HAVE TWO. Both hands trace the same aim, so
+	// on a single target the rate that matters is double what is listed here
+	// -- which is why the table reads 1.65 at the bottom rather than 3.3. The
+	// numbers were set for one gun first and then halved when dual wield
+	// became the starting kit, or the anchors would have been hit at half the
+	// intended time. 20 / (2 x 1.65) is six seconds; 20 / (2 x 30) is a third.
+	//
+	// Seven rungs, geometric at about x1.62, so no tier is a dead step.
+	//
+	// IT USED TO BE INDEXED BY BAND ALONE, and that could not express this.
+	// A band comes from heat, heat starts at zero, so a tier-7 gun opened
+	// fire at exactly the same rate as a tier-1 one and only pulled ahead
+	// once it warmed up -- which means "a third of a second at max tier"
+	// was unreachable against a fresh target no matter what the numbers
+	// were. Tier has to scale the base for the ask to mean anything.
+	double TierBase() const
+	{
+		switch (Tier())
+		{
+			case 1:  return 1.65;
+			case 2:  return 2.70;
+			case 3:  return 4.35;
+			case 4:  return 7.00;
+			case 5:  return 11.50;
+			case 6:  return 18.50;
+			default: return 30.00;
+		}
+	}
+
+	// HEAT ON TOP, x1 cold to x2.5 at the top band.
+	//
+	// Stepping with the BAND rather than smoothly with heat, because the
+	// colour is the only damage gauge this weapon has and it steps. A rate
+	// that slid continuously under a stepped colour would make the gauge a
+	// liar. A tier-1 gun has a single band and so gets no multiplier, which
+	// is right: it has no colour change either.
 	double DPS() const
 	{
-	// SEVEN RUNGS, roughly x1.57 apart. A tier-1 gun only ever sees the
-	// first; a tier-7 gun climbs all of them inside one ten-second hold.
-	//
-	// The ratio matters more than the numbers. Each rung being half again as
-	// hard as the last is what keeps the top of a full ladder feeling like a
-	// different weapon rather than a slightly better one -- 900 against 60 is
-	// fifteen times, and it is reached by the same trigger pull.
-		switch (Band())
-		{
-			case 0:  return 60.0;
-			case 1:  return 95.0;
-			case 2:  return 150.0;
-			case 3:  return 235.0;
-			case 4:  return 370.0;
-			case 5:  return 580.0;
-			default: return 900.0;
-		}
+		int t = Tier();
+		if (t <= 1) return TierBase();
+
+		double f = double(Band()) / double(t - 1);
+		return TierBase() * (1.0 + 1.5 * f);
 	}
 
 	// ---- BEAM SLOT BUDGET ----------------------------------------------
@@ -307,8 +370,57 @@ class LNC_Lance : Weapon
 		return 0;
 	}
 
-	// Three slots per hand, contiguous: mainhand 0-2, offhand 3-5. Two spare.
+	// Three slots per hand, contiguous: mainhand 0-2, offhand 3-5. The two
+	// that used to be spare are the cook glow, one per hand.
 	int SlotBase() { return BeamSlot() == 1 ? 3 : 0; }
+	int CookSlot() { return BeamSlot() == 1 ? 7 : 6; }
+
+	// ---- THE COOK -------------------------------------------------------
+	//
+	// How much has been poured into the thing currently under the beam.
+	// Tracked per WEAPON rather than per victim: the beam only ever burns one
+	// actor at a time, so a single accumulator and a note of who it belongs
+	// to is enough, and it costs nothing on the monsters.
+	Actor  cookTarget;
+	double cookAmt;
+
+	// A HOT SPOT THAT GROWS WHERE THE BEAM IS LANDING.
+	//
+	// Not a flame and not a decal -- a beam of almost no length, which the
+	// segment solver lights as a small sphere. It starts as a pinprick on
+	// contact and swells as the target takes damage, so a thing visibly cooks
+	// before it dies. On a boss it is the only feedback that a long hold is
+	// achieving anything at all.
+	//
+	// SCALED AGAINST SPAWN HEALTH, so it is full right as the thing dies
+	// whether that is a zombieman or a Baron. A fixed threshold would fill
+	// instantly on fodder and never fill on anything big.
+	void DrawCookGlow(Vector3 where, Actor victim)
+	{
+		double maxhp = victim ? double(victim.SpawnHealth()) : 100.0;
+		if (maxhp < 1.0) maxhp = 1.0;
+
+		double f = clamp(cookAmt / maxhp, 0.0, 1.0);
+
+		// SQUARED, because "start super small". Linear growth is already a
+		// third of the final size after a third of the damage, which reads as
+		// popping into existence rather than kindling.
+		double g = f * f;
+
+		// Orange into white-hot. Intensity climbs past 1.0 deliberately: the
+		// scene renders to a float target and the bloom pass thresholds at
+		// 1.0, so the top of this range blooms on its own without a dynamic
+		// light being involved.
+		Color col = LNC_Lance.LerpCol(0xFF5A08, 0xFFD070, f);
+
+		// Given a hair of length rather than a true zero, so nothing in the
+		// air-glow pass has to divide by a null direction.
+		level.SetBeam(CookSlot(), where, where + (0, 0, 0.05),
+			0.25 + 3.00 * g,
+			0.40 + 5.00 * g,
+			col,
+			0.20 + 1.50 * g);
+	}
 
 	// ---- THE THREE-LAYER BEAM -------------------------------------------
 	//
@@ -360,10 +472,18 @@ class LNC_Lance : Weapon
 		// stays low so it never competes with the core for the eye, and so
 		// the two together do not stack past the bloom threshold except at
 		// the very top band.
-		double sheathThick = 2.4 + 1.5 * step + 1.6 * flash;
+		// SIZED DOWN HARD. The first pass at these numbers produced wide
+		// diagonal shafts of light crossing the whole view instead of a
+		// beam, and the reason is `soft` rather than `thick`: main.fp lights
+		// out to thick + soft*8, so a soft of 5.0 is a FORTY-TWO UNIT glow
+		// radius. Starting that twenty units from the eye fills the screen.
+		//
+		// A tier-1 laser wants to be thin and precise. It earns its width by
+		// climbing the ladder, not by default.
+		double sheathThick = 0.9 + 0.45 * step + 0.8 * flash;
 		level.SetBeam(base + 0, a, b,
 			sheathThick,
-			5.0 + 2.6 * step + 3.0 * flash,      // soft: this is the volume
+			1.6 + 0.8 * step + 1.2 * flash,      // soft: reach ~14 units cold
 			col,
 			0.15 + 0.06 * step + 0.25 * flash);
 
@@ -391,11 +511,28 @@ class LNC_Lance : Weapon
 		// Expressed as a multiple of the sheath instead, the core always
 		// rides outside the solid middle and inside the halo, at every band
 		// and from the very first tic of the very first shot.
-		double coreRad = sheathThick * 1.55 + 1.0 + 1.5 * flash;
+		// THE ORBIT CONVERGES AT THE MUZZLE.
+		//
+		// It used to offset the START point, which is what put the core and
+		// the filament visibly leaving from ABOVE and BELOW the barrel rather
+		// than out of it -- an offset of five or seven units, twenty units
+		// from the eye, is a huge angle on screen even though it is nothing
+		// in world terms.
+		//
+		// So the moving end is the FAR end now, and the near end stays pinned
+		// to the muzzle with everything else. All three layers leave the
+		// barrel from one point and separate along their length, which is
+		// both what a real emitter does and what stops the weapon looking
+		// like three guns bolted together.
+		//
+		// The far end is hundreds of units away, so the same few units of
+		// offset there is a slow subtle wander instead of a wide arc -- which
+		// is the motion that was wanted in the first place.
+		double coreRad = 0.9 + 0.5 * step + 0.8 * flash;
 		Vector3 coreOff = (u * cos(coreAng) + v * sin(coreAng)) * coreRad;
-		level.SetBeam(base + 1, a + coreOff, b,
-			0.85 + 0.30 * step + 1.4 * flash,
-			1.00 + 0.45 * step + 1.6 * flash,
+		level.SetBeam(base + 1, a, b + coreOff,
+			0.42 + 0.16 * step + 0.7 * flash,
+			0.55 + 0.24 * step + 0.8 * flash,
 			innerCol,
 			0.48 + 0.15 * step + 0.45 * flash);
 
@@ -407,11 +544,11 @@ class LNC_Lance : Weapon
 		// Offset 140 degrees at t=0 so the two are never briefly coincident
 		// at the start of a burst, which would look like a glitch.
 		double filAng = 140.0 - Level.maptime * (1.5 + 0.35 * step);
-		double filRad = sheathThick * 2.45 + 1.4 + 2.0 * flash;
+		double filRad = 1.5 + 0.7 * step + 1.1 * flash;
 		Vector3 filOff = (u * cos(filAng) + v * sin(filAng)) * filRad;
-		level.SetBeam(base + 2, a + filOff, b,
-			0.34 + 0.14 * step,
-			0.70 + 0.30 * step + 1.0 * flash,
+		level.SetBeam(base + 2, a, b + filOff,
+			0.20 + 0.08 * step,
+			0.38 + 0.16 * step + 0.5 * flash,
 			innerCol,
 			0.24 + 0.10 * step + 0.35 * flash);
 	}
@@ -421,6 +558,14 @@ class LNC_Lance : Weapon
 		int base = SlotBase();
 		for (int i = 0; i < 3; i++)
 			level.SetBeam(base + i, (0, 0, 0), (0, 0, 0), 0.01, 0.01, 0, 0.0);
+
+		// The cook glow sits outside the three-layer block, so it has to be
+		// released here as well or a hot spot stays burning in mid-air after
+		// the trigger comes up. Forgetting the target with it means the next
+		// thing you touch starts cold instead of inheriting this one's cook.
+		level.SetBeam(CookSlot(), (0, 0, 0), (0, 0, 0), 0.01, 0.01, 0, 0.0);
+		cookTarget = null;
+		cookAmt = 0.0;
 	}
 
 	// ---- colour ---------------------------------------------------------
@@ -464,6 +609,23 @@ class LNC_Lance : Weapon
 	// Cold end to hot end, and deliberately not a single ramp -- green in
 	// the middle breaks blue-to-red into two halves so adjacent rungs are
 	// never nearly the same colour.
+	// STATIC, so the Lash can call it. "Same colours means stronger" only
+	// holds if there is literally one table -- two copies would drift the
+	// first time either was tuned.
+	static Color BandColor(int band)
+	{
+		switch (band)
+		{
+			case 0:  return 0x2050FF;   // deep electric blue
+			case 1:  return 0x00D8FF;   // cyan
+			case 2:  return 0x40FF80;   // green
+			case 3:  return 0xFFF0A0;   // pale gold
+			case 4:  return 0xFFA020;   // amber
+			case 5:  return 0xFF3A10;   // furnace
+			default: return 0xFF40FF;   // magenta: the top of the ladder
+		}
+	}
+
 	Color CoreColor() const
 	{
 		switch (Band())
@@ -626,7 +788,11 @@ class LNC_Lance : Weapon
 		// SIX: three layers per hand, contiguous. Slots are zeroed on release
 		// rather than left holding stale endpoints, or a holstered hand's
 		// beam would keep being drawn.
-		level.SetBeamCount(6, 0.28, 1.0);
+		// The shared count -- see LNC_Whip.BEAM_COUNT_SHARED, currently 64.
+		// This is frame-global, so if the three weapons disagree the last one
+		// to write each tic shrinks the others out of existence. Never write a
+		// literal here; take the constant.
+		level.SetBeamCount(LNC_Whip.BEAM_COUNT_SHARED, 0.28, 1.0);
 
 		level.SetBeamLook(
 			0.45 + 0.55 * charge,         // air glow
@@ -739,6 +905,19 @@ class LNC_Lance : Weapon
 		}
 
 		w.burn += w.DPS() / 35.0;
+
+		// THE COOK, accumulated at the RATE rather than in whole points, so
+		// the glow swells smoothly instead of stepping each time a damage
+		// point happens to land. Sweeping onto a new target starts it from
+		// cold rather than handing it the last one's progress.
+		if (w.cookTarget != victim)
+		{
+			w.cookTarget = victim;
+			w.cookAmt = 0.0;
+		}
+		w.cookAmt += w.DPS() / 35.0;
+		w.DrawCookGlow(hitData.HitLocation, victim);
+
 		int whole = int(w.burn);
 		if (whole <= 0) return;
 		w.burn -= whole;
@@ -932,12 +1111,18 @@ class LNC_LanceOffhand : LNC_Lance
 
 
 // =====================================================================
-// LNC_LaserMarine -- the class that starts with one.
+// LNC_LaserMarine -- the class that starts with both.
 //
-// ONE LANCE, MAINHAND. Not two. The second gun is an unlock earned from
-// the first core you find (see LNC_LanceCore) -- handing out the pair at
-// spawn would spend the run's biggest power spike before the player has
-// fired a shot, and would leave the first drop with nothing to mean.
+// TWO LANCES, ONE PER HAND, FROM THE FIRST TIC. This was one gun with the
+// second held back as the first core's reward, and that was the wrong thing
+// to charge for: it made the opening map a slog at half damage, waiting on a
+// drop, to buy a spike that was never really in doubt. The guns are the
+// weapon -- start holding the weapon.
+//
+// WHAT CORES BUY NOW IS TIER, which is the rate both guns fire at, and they
+// arrive on a curve that starts generous and tightens (LNC_DropHandler).
+// That puts the progression in the thing you feel every second you hold the
+// trigger, rather than in a one-off unlock.
 //
 // A PLAYER CLASS RATHER THAN AN UNCONDITIONAL GRANT. This used to be an
 // event handler that gave every player a Lance on spawn regardless of who
@@ -966,11 +1151,36 @@ class LNC_LaserMarine : DoomPlayer
 	{
 		Super.GiveDefaultInventory();
 
+		// A LANCE IN EACH HAND, FROM THE FIRST TIC.
+		//
+		// Dual wield used to be the unlock the first core bought. It is the
+		// starting kit now: the guns are the weapon, and spending the opening
+		// map at half the damage waiting on a 2% drop was paying for a spike
+		// that had already been decided. Cores still exist and still matter --
+		// they buy tier, which is the rate both guns fire at.
+		//
+		// Both seated explicitly. Player.StartItem cannot do this job: it only
+		// auto-selects weapons that HAVE ammo, and none of these has an ammo
+		// type at all, so they would be granted and then left sitting
+		// unequipped behind the pistol.
+		//
+		// THE LASH COMES ALONG BUT NOT IN A HAND. Both it and the offhand
+		// Lance want the one offhand slot, and the gun wins -- the whip is
+		// still experimental. It is on slot 6 whenever it is wanted.
+		//
+		// Their beams do not collide -- the Lances draw in slots 0-5 with
+		// their cook glows in 6-7, the Lash in 8-15, and all of them ask for
+		// the same frame-global beam count.
 		A_GiveInventory("LNC_Lance", 1);
+		A_GiveInventory("LNC_LanceOffhand", 1);
+		A_GiveInventory("LNC_Whip", 1);
 		if (CountInv("LNC_LanceTier") < 1)
 			A_GiveInventory("LNC_LanceTier", 1);
 
 		let w = Weapon(FindInventory("LNC_Lance"));
 		if (w && player) player.PendingWeapon = w;
+
+		let off = Weapon(FindInventory("LNC_LanceOffhand"));
+		if (off && player) player.OffhandWeapon = off;
 	}
 }

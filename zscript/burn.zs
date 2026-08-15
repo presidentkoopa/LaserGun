@@ -206,7 +206,11 @@ class LNC_Pyre : Actor
 		// TWO OR THREE SCREAMS, not one per tic and not a fixed count. A
 		// burning thing cries out more than once, but a room of them must
 		// not become a wall of noise.
-		screamsLeft = Random(2, 3);
+		// ONE OR TWO, down from two or three. Even with six takes across two
+		// voices, a room being cleared was producing more screaming than the
+		// shooting -- and a sound that plays constantly stops carrying the
+		// information it exists to carry.
+		screamsLeft = Random(1, 2);
 	}
 
 	override void PostBeginPlay()
@@ -265,7 +269,9 @@ class LNC_Pyre : Actor
 		// THE SCREAMS. Spread across the first half of the burn and rolled
 		// from a $random group, so six takes across two voices means a pile
 		// of burning zombies is a chorus rather than one sound repeated.
-		if (p.screamsLeft > 0 && Random(0, 22) == 0)
+		// Half as often as before, so the ones that do land are spread across
+		// the burn instead of arriving on top of each other.
+		if (p.screamsLeft > 0 && Random(0, 45) == 0)
 		{
 			p.screamsLeft--;
 			A_StartSound(Random(0, 1) == 0 ? "lnc/burn/scream1" : "lnc/burn/scream2",
@@ -306,6 +312,35 @@ class LNC_Pyre : Actor
 // ---------------------------------------------------------------------
 class LNC_BurnHandler : EventHandler
 {
+	// PERCENT OF LANCE KILLS THAT CATCH FIRE, BY THE KILLER'S TIER.
+	//
+	// Rare at the bottom and capped at a third even at the top. Every kill
+	// igniting turned a cleared room into a field of pyres and, worse, into a
+	// wall of screaming -- and a sound that happens every single time stops
+	// being an event and becomes ambience you want switched off.
+	//
+	// Scaling it with tier also makes it read as the weapon instead of as a
+	// dice roll: a tier-1 beam scorches things, a tier-7 beam sets one in
+	// three of them alight. The effect showing up more often IS the upgrade
+	// being visible, which is worth more than a flat rate tuned to taste.
+	//
+	// This is the only knob for pyre frequency. LNC_Pyre's own screamsLeft
+	// and its roll control how loud ONE pyre is; this controls how many
+	// there are, and that is the one that was actually the problem.
+	static int IgniteChance(int tier)
+	{
+		switch (tier)
+		{
+			case 1:  return 4;
+			case 2:  return 8;
+			case 3:  return 12;
+			case 4:  return 17;
+			case 5:  return 22;
+			case 6:  return 27;
+			default: return 33;
+		}
+	}
+
 	override void WorldThingDied(WorldEvent e)
 	{
 		let victim = e.Thing;
@@ -318,6 +353,20 @@ class LNC_BurnHandler : EventHandler
 
 		let src = e.Inflictor ? e.Inflictor : victim.target;
 		if (!IsLanceKill(e)) return;
+
+		// NOT EVERY KILL CATCHES, and how often is the killer's tier.
+		//
+		// Rolled here rather than inside SetupPyre so a kill that does not
+		// catch costs nothing whatsoever: no actor spawned, no thinker, no
+		// sound. Falls back to tier 1 -- the rarest -- when the killer cannot
+		// be identified, which is the right direction to be wrong in for an
+		// effect whose failure mode is noise.
+		int tier = 1;
+		let killer = victim.target;
+		if (killer && killer.player)
+			tier = clamp(killer.CountInv("LNC_LanceTier"), 1, LNC_Lance.LNC_MAX_TIER);
+
+		if (Random(0, 99) >= IgniteChance(tier)) return;
 
 		victim.A_GiveInventory("LNC_Burned", 1);
 
