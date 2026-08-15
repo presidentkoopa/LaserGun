@@ -305,8 +305,9 @@ class LNC_Lance : Weapon
 		// stays low so it never competes with the core for the eye, and so
 		// the two together do not stack past the bloom threshold except at
 		// the very top band.
+		double sheathThick = 2.4 + 1.5 * step + 1.6 * flash;
 		level.SetBeam(base + 0, a, b,
-			2.4 + 1.5 * step + 1.6 * flash,      // thick
+			sheathThick,
 			5.0 + 2.6 * step + 3.0 * flash,      // soft: this is the volume
 			col,
 			0.15 + 0.06 * step + 0.25 * flash);
@@ -319,7 +320,23 @@ class LNC_Lance : Weapon
 		// slightly with heat, so the top band feels agitated instead of
 		// frantic.
 		double coreAng = Level.maptime * (2.2 + 0.5 * step);
-		double coreRad = 2.2 + 0.9 * step + 2.0 * flash;
+
+		// THE ORBIT IS MEASURED AGAINST THE SHEATH, NOT IN ABSOLUTE UNITS,
+		// and that is the fix for "the circulating laser is not there for the
+		// first few tics."
+		//
+		// It was a flat 2.2 + 0.9*step while the sheath's dense middle was
+		// 2.4 + 1.5*step. At band 0 the orbit was SMALLER than the sheath
+		// core, so the circulating beam was inside the solid part of the
+		// sheath and simply could not be seen -- and because the sheath grew
+		// faster per band than the orbit did, it stayed buried at every band.
+		// The only time it showed was during a gear-change flash, which adds
+		// 2.0 to the radius for five tics.
+		//
+		// Expressed as a multiple of the sheath instead, the core always
+		// rides outside the solid middle and inside the halo, at every band
+		// and from the very first tic of the very first shot.
+		double coreRad = sheathThick * 1.55 + 1.0 + 1.5 * flash;
 		Vector3 coreOff = (u * cos(coreAng) + v * sin(coreAng)) * coreRad;
 		level.SetBeam(base + 1, a + coreOff, b,
 			0.85 + 0.30 * step + 1.4 * flash,
@@ -335,7 +352,7 @@ class LNC_Lance : Weapon
 		// Offset 140 degrees at t=0 so the two are never briefly coincident
 		// at the start of a burst, which would look like a glitch.
 		double filAng = 140.0 - Level.maptime * (1.5 + 0.35 * step);
-		double filRad = 3.8 + 1.4 * step + 2.4 * flash;
+		double filRad = sheathThick * 2.45 + 1.4 + 2.0 * flash;
 		Vector3 filOff = (u * cos(filAng) + v * sin(filAng)) * filRad;
 		level.SetBeam(base + 2, a + filOff, b,
 			0.34 + 0.14 * step,
