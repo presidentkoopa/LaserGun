@@ -221,60 +221,102 @@ class LNC_Lance : Weapon
 		return 0;
 	}
 
-	int HelixBase() { return BeamSlot() == 1 ? 5 : 2; }
-	const LNC_HELIX_CHORDS = 3;
+	// Three slots per hand, contiguous: mainhand 0-2, offhand 3-5. Two spare.
+	int SlotBase() { return BeamSlot() == 1 ? 3 : 0; }
 
-	// ---- the spiral -----------------------------------------------------
+	// ---- THE THREE-LAYER BEAM -------------------------------------------
 	//
-	// A helix around the beam axis, drawn as a chain of straight chords --
-	// the Quake 2 railgun trick, except these are real lights that brighten
-	// the walls they pass, not a sprite trail.
+	// The owner's shape, from watching it fire: "this dense, solid beam
+	// firing in a slow circular motion, inside of a softer, larger beam."
 	//
-	// Consecutive chords share endpoints, so the polyline is CONTINUOUS: no
-	// gaps to read as beads. It faceted rather than curved, which at this
-	// thickness and glow is invisible.
+	//     SHEATH     wide, soft, dim, dead on the axis. The volume.
+	//     CORE       dense, thin, bright. Its MUZZLE END orbits slowly.
+	//     FILAMENT   thinner still, orbiting the other way, wider radius.
 	//
-	// THE BASIS IS BUILT FROM THE AXIS AND NOTHING ELSE. No hand matrices,
-	// no cvars, no engine conventions to mirror -- just "any two directions
-	// perpendicular to this line". Getting it wrong can only make the
-	// spiral wobble; it cannot move the core beam, which is drawn from
-	// `from` and `to` directly and never touches this.
-	void DrawHelix(Vector3 a, Vector3 b, double radius, double turns,
-		double phase, Color col, double thick, double soft, double inten)
+	// ONLY THE START MOVES. Both far ends stay pinned to the impact point,
+	// so the moving layers CONVERGE on the target rather than sliding off
+	// it -- the beam looks stirred at the barrel and perfectly accurate at
+	// the other end, which is both the nicer read and the honest one, since
+	// the damage lands where the far end is.
+	//
+	// AND THIS REPLACES THE HELIX ENTIRELY, which is a straight upgrade.
+	// A helix had to be built from chords -- three per hand was the whole
+	// slot budget -- and three straight chords rotating about an axis is a
+	// spinning triangle, which is exactly why it read as a gatling barrel.
+	// These are SINGLE straight beams whose endpoints move, so there is no
+	// polyline, no faceting, and nothing to approximate. The motion is
+	// perfectly smooth because there is no geometry being subdivided.
+	//
+	// THE BASIS IS BUILT FROM THE AXIS AND NOTHING ELSE -- no hand matrices,
+	// no cvars, no engine convention to mirror. Just "any two directions
+	// perpendicular to this line".
+	void DrawBeamStack(Vector3 a, Vector3 b, int band, double flash,
+		Color col, Color innerCol)
 	{
+		int base = SlotBase();
+
 		Vector3 axis = b - a;
 		double len = axis.Length();
-		if (len < 2.0) return;
+		if (len < 2.0) { ClearBeams(); return; }
 		axis /= len;
 
-		// Any perpendicular will do. Cross with world up unless the beam IS
-		// world up, in which case cross with something else.
 		Vector3 u = ((0, 0, 1) cross axis);
 		if (u dot u < 1e-6) u = ((1, 0, 0) cross axis);
 		double ul = u.Length();
-		if (ul < 1e-6) return;
+		if (ul < 1e-6) { ClearBeams(); return; }
 		u /= ul;
-		Vector3 v = (axis cross u);      // unit by construction: both unit, perpendicular
+		Vector3 v = (axis cross u);      // unit by construction
 
-		int base = HelixBase();
-		for (int i = 0; i < LNC_HELIX_CHORDS; i++)
-		{
-			double t0 = double(i) / LNC_HELIX_CHORDS;
-			double t1 = double(i + 1) / LNC_HELIX_CHORDS;
-			double a0 = phase + turns * 360.0 * t0;
-			double a1 = phase + turns * 360.0 * t1;
+		double step = double(band);
 
-			Vector3 p0 = a + axis * (len * t0) + (u * cos(a0) + v * sin(a0)) * radius;
-			Vector3 p1 = a + axis * (len * t1) + (u * cos(a1) + v * sin(a1)) * radius;
+		// --- THE SHEATH. Wide and soft and deliberately DIM: it is the
+		// atmosphere the core burns inside, not a second beam. Its intensity
+		// stays low so it never competes with the core for the eye, and so
+		// the two together do not stack past the bloom threshold except at
+		// the very top band.
+		level.SetBeam(base + 0, a, b,
+			2.4 + 1.5 * step + 1.6 * flash,      // thick
+			5.0 + 2.6 * step + 3.0 * flash,      // soft: this is the volume
+			col,
+			0.15 + 0.06 * step + 0.25 * flash);
 
-			level.SetBeam(base + i, p0, p1, thick, soft, col, inten);
-		}
+		// --- THE CORE. Dense, tight, bright, and stirred.
+		//
+		// SLOW, as asked. 2.2 degrees a tic is about a revolution every five
+		// seconds -- fast enough to be unmistakably moving, slow enough that
+		// it reads as a deliberate motion rather than a spin. Speeds up only
+		// slightly with heat, so the top band feels agitated instead of
+		// frantic.
+		double coreAng = Level.maptime * (2.2 + 0.5 * step);
+		double coreRad = 2.2 + 0.9 * step + 2.0 * flash;
+		Vector3 coreOff = (u * cos(coreAng) + v * sin(coreAng)) * coreRad;
+		level.SetBeam(base + 1, a + coreOff, b,
+			0.85 + 0.30 * step + 1.4 * flash,
+			1.00 + 0.45 * step + 1.6 * flash,
+			innerCol,
+			0.48 + 0.15 * step + 0.45 * flash);
+
+		// --- THE FILAMENT. Counter-rotating, wider orbit, thinner and
+		// dimmer. Two things turning opposite ways is what stops the stack
+		// reading as one rigid object being waved about -- it gives the
+		// beam internal motion instead of just motion.
+		//
+		// Offset 140 degrees at t=0 so the two are never briefly coincident
+		// at the start of a burst, which would look like a glitch.
+		double filAng = 140.0 - Level.maptime * (1.5 + 0.35 * step);
+		double filRad = 3.8 + 1.4 * step + 2.4 * flash;
+		Vector3 filOff = (u * cos(filAng) + v * sin(filAng)) * filRad;
+		level.SetBeam(base + 2, a + filOff, b,
+			0.34 + 0.14 * step,
+			0.70 + 0.30 * step + 1.0 * flash,
+			innerCol,
+			0.24 + 0.10 * step + 0.35 * flash);
 	}
 
-	void ClearHelix()
+	void ClearBeams()
 	{
-		int base = HelixBase();
-		for (int i = 0; i < LNC_HELIX_CHORDS; i++)
+		int base = SlotBase();
+		for (int i = 0; i < 3; i++)
 			level.SetBeam(base + i, (0, 0, 0), (0, 0, 0), 0.01, 0.01, 0, 0.0);
 	}
 
@@ -452,8 +494,8 @@ class LNC_Lance : Weapon
 		// how you know when to let go. Within a band it still creeps a
 		// little so it never looks frozen.
 		double step = double(band);
-		double thick = 1.2 + 0.95 * step + 0.30 * charge + 2.2 * flash;
-		double soft  = 1.5 + 1.15 * step + 0.40 * charge + 2.6 * flash;
+		// Width and brightness per layer now live in DrawBeamStack, since the
+		// three want different shapes rather than one scaled three ways.
 
 		// INTENSITY STAYS UNDER 1.0 UNTIL THE TOP BAND. The fork's beam doc
 		// notes the air glow feeds bloom by itself "since a core burning past
@@ -461,22 +503,22 @@ class LNC_Lance : Weapon
 		// only blooms out in band 5, where it is the warning rather than the
 		// weapon's baseline appearance -- and for the few tics of a gear
 		// change, where blowing out IS the announcement.
-		double inten = 0.34 + 0.17 * step + 0.55 * flash;
 
 		// The colour IS the gauge; you read your heat off the beam without
 		// looking away from what you are killing. Washed toward white for the
 		// duration of a gear change.
-		Color col = LNC_Lance.LerpCol(w.CoreColor(), 0xFFFFFF, flash);
+		Color col      = LNC_Lance.LerpCol(w.CoreColor(),  0xFFFFFF, flash);
+		Color innerCol = LNC_Lance.LerpCol(w.HelixColor(), 0xFFFFFF, flash);
 
 		// FRAME-GLOBAL, BOTH OF THESE. SetBeamCount's glow term and every
 		// SetBeamLook value cover EVERY beam in the scene -- they are single
 		// vec4s in the viewpoint block, not arrays. If a second beam user
 		// ever exists, these want one owner rather than each actor stomping
 		// the others every tic.
-		// EIGHT, because the helix lives in the upper six. Unused slots are
-		// zeroed on release rather than left holding stale endpoints, or a
-		// holstered hand's spiral would keep being drawn.
-		level.SetBeamCount(8, 0.28, 1.0);
+		// SIX: three layers per hand, contiguous. Slots are zeroed on release
+		// rather than left holding stale endpoints, or a holstered hand's
+		// beam would keep being drawn.
+		level.SetBeamCount(6, 0.28, 1.0);
 
 		level.SetBeamLook(
 			0.45 + 0.55 * charge,         // air glow
@@ -503,57 +545,20 @@ class LNC_Lance : Weapon
 			0.45 - 0.30 * charge,         // taper, slackening as it heats
 			1.2 + 0.35 * step);           // impact flare, stepping with band
 
-		level.SetBeam(w.BeamSlot(), drawFrom, to, thick, soft, col, inten);
-
-		// ---- THE SPIRAL -----------------------------------------------------
+		// THE THREE LAYERS -- sheath, stirred core, counter-rotating filament.
+		// See DrawBeamStack for the shape and why it replaced the helix.
 		//
-		// Not present in band 0. That is deliberate and it is the single best
-		// thing about it: a cold beam is one clean thin line, and the spiral
-		// APPEARS the moment you gear up. So the weapon visibly grows a
-		// second component rather than merely getting brighter, and you can
-		// see at a glance whether the thing in your hands is the sweeping
-		// tool or the boss-killer.
+		// PRESENT IN EVERY BAND. The owner watched a burst and asked for the
+		// circular motion "for the entire firing duration", so unlike the old
+		// spiral this does not wait for band 2 to appear. The bands still
+		// change the beam plenty -- width, brightness, orbit radius, orbit
+		// speed and the flare all step -- but the SHAPE is constant, so the
+		// weapon has one identity that intensifies rather than two that swap.
 		//
-		// It tightens, widens and spins faster with every band. At the top it
-		// is a magenta braid whipping around a furnace-red core, which is
-		// exactly as subtle as a weapon that is two thirds of a second from
-		// cooking off should be.
-		if (band > 0)
-		{
-			// TURNS BELOW 1, AND THIS IS THE WHOLE FIX FOR "IT LOOKS LIKE A
-			// GATLING LASER".
-			//
-			// Three chords is all the slot budget allows per hand. At 0.85+
-			// turns each chord sweeps 100-140 degrees, and a chord that wide
-			// is not an arc -- it is a straight bar. Three straight bars
-			// rotating about an axis is a spinning triangle, which is exactly
-			// what a gatling barrel looks like. The faceting WAS the effect.
-			//
-			// At 0.55 turns each chord spans about 66 degrees, which is
-			// shallow enough to read as a curve, and the polyline reads as
-			// one filament winding round the core instead of three separate
-			// beams chasing each other.
-			double turns = 0.55;
-
-			// AND IT HAS TO HUG. A wide orbit separates the filament from the
-			// core and they stop being one object; kept close, the spiral is
-			// a texture ON the beam rather than something orbiting it.
-			double radius = 1.1 + 0.45 * step + 1.2 * flash;
-
-			// Slower, too. Fast rotation on a coarse polyline is what makes
-			// the facets legible in the first place.
-			double spin = Level.maptime * (2.6 + 1.4 * step);
-
-			w.DrawHelix(drawFrom, to, radius, turns, spin,
-				LNC_Lance.LerpCol(w.HelixColor(), 0xFFFFFF, flash),
-				0.32 + 0.14 * step,               // thin: it is a filament
-				0.55 + 0.30 * step + 1.0 * flash, // but it glows generously
-				0.26 + 0.11 * step + 0.5 * flash);
-		}
-		else
-		{
-			w.ClearHelix();
-		}
+		// `innerCol` is the pale companion hue; the sheath takes the core
+		// colour so the volume and the filament read as one object lit from
+		// inside.
+		w.DrawBeamStack(drawFrom, to, band, flash, col, innerCol);
 
 		// THE VOLUMETRIC LAYER -- the air around the beam, not the beam.
 		//
@@ -658,12 +663,10 @@ class LNC_Lance : Weapon
 			if (who) who.A_StopSound(CHAN_5);
 			firing = false;
 		}
-		level.SetBeam(BeamSlot(), (0, 0, 0), (0, 0, 0), 0.01, 0.01, 0, 0.0);
-
-		// This hand's three helix chords too. The count stays at 8 once
+		// All three of this hand's layers. The count stays at 6 once
 		// anything has fired, so a slot left holding real endpoints would go
 		// on being drawn after the trigger came up.
-		ClearHelix();
+		ClearBeams();
 
 		// The volumetric layer is a single global with no slot to zero, so it
 		// must be switched off explicitly -- and only by the hand that
