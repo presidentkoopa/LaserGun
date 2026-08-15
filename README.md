@@ -1,4 +1,5 @@
 # The Lance
+(Yo these screens were taken during testing on deskop. in VR it fires from the gun, i promise)
 
 A real beam weapon for the **UZDXREMA** engine fork. Not a sprite, not a chain
 of puffs — the engine lights every pixel by its distance from the beam, so it is
