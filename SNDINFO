@@ -7,7 +7,16 @@
 // a lower channel so it does not fight a mod's own weapon or item sounds.
 
 lnc/charge    PLCHRG
-lnc/loop      PLALTF
+// THE BEAM VOICE. Cut from the sustain body of a Klingon disruptor (0.13-0.59s
+// of the source, past the attack and before the decay), then the end crossfaded
+// back over the head so the wrap has no seam. 0.46s, mono, no leading silence.
+//
+// TWO THINGS THAT MADE EARLIER ATTEMPTS TICK, both worth knowing:
+//   - ffmpeg -ss seeking INTO an mp3 primes the decoder and leaves ~20ms of
+//     near-silence at the head. Decode the whole file first, then atrim.
+//   - alimiter pads the stream start with its lookahead, same symptom.
+// Either one puts a hole at the top of the loop that clicks every 0.46s.
+lnc/loop      LNCLOOP
 lnc/cookoff   PLCOUT
 lnc/empty     AKEMPT
 lnc/sizzle    AKEMPT
