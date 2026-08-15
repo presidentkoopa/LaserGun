@@ -1,188 +1,327 @@
 // =====================================================================
 // THE LANCE -- a real beam weapon for the UZDXREMA engine fork.
 //
-// Standalone extraction of RS_Main's RS_LaserGun. Same weapon, same feel,
-// none of RS_Main: no affix system, no attack-profile assembly, no
-// GunBonsai bridge, no stat rolls, no shared FX catalog. It descends from
-// plain Weapon and does its own damage, so it drops into any mod.
+// Standalone extraction of RS_Main's RS_LaserGun. Descends from plain
+// Weapon and does its own damage, so it drops into any mod.
 //
 // WHAT MAKES IT A BEAM AND NOT A FAST HITSCAN. The engine fork draws it by
 // lighting every pixel by its distance from the segment -- Level.SetBeam,
-// FORK_CHANGES.md section 13. So it is not a sprite and not a chain of
-// puffs: it is continuous at any length, it wraps floor/wall/ceiling as
-// one unbroken object, it is visible hanging in the air, it correctly
-// vanishes behind walls, and the surfaces near it brighten because they
-// ARE near it. Nothing extra is spawned to fake any of that.
+// FORK_CHANGES.md section 13. It is not a sprite and not a chain of puffs:
+// continuous at any length, wrapping floor/wall/ceiling as one unbroken
+// object, visible hanging in the air, correctly vanishing behind walls, and
+// the surfaces near it brighten because they ARE near it.
 //
-// AND THAT IS THE WEAPON'S REAL COST. In a dark map you can see twenty
-// metres; the moment you fire, a line of white light hangs in the air
-// lighting the corridor and you standing in it. Pulling the trigger is a
-// tactical disclosure. The damage is balanced knowing that.
+// AND IT DOES NOT FIRE. There are no shots. The beam is ON, and while it is
+// on it deposits energy at a RATE -- damage is accumulated per tic as a real
+// number and spent when it builds a whole point. No hitscans, no puffs, no
+// cadence, no impact stutter.
 //
-// ONE CURVE. Everything -- damage, rate of fire, colour, width,
-// brightness, sound pitch, even how long the next pull takes to spin up --
-// is derived from CHARGE, which is heat/LNC_OVERHEAT, 0 to 1.
+// ---------------------------------------------------------------------
+// NO AMMO. HEAT IS THE ONLY RESOURCE.
 //
-//   HOLDING RAMPS YOU UP.  0.4x damage cold, 3.0x at the edge of overheat,
-//                          on a back-loaded curve, and the cadence tightens
-//                          from every 4 tics to every 2. Together: about
-//                          14 DPS the instant the beam bites, about 210 at
-//                          the top.
+// Heat runs 0 to 100. Holding the trigger drives it up at 25/second, so a
+// continuous hold reaches 100 in four seconds. Off the trigger it falls at
+// 12.5/second -- half speed, so short bursts are nearly free and long holds
+// commit. Touch 100 and the weapon locks out for a flat five seconds and
+// comes back stone cold.
 //
-//   RELEASING KEEPS IT.    Heat bleeds at half the rate it builds, so a
-//                          short pulse costs almost none of the ramp.
-//                          Pulse the trigger to sit just under cook-off
-//                          and hold peak damage indefinitely.
+// FIVE BANDS, each a flat damage rate:
 //
-//   RE-PULLING COSTS.      Every pull pays a spin-up before it damages
-//                          anything -- but the spin-up SHORTENS with charge
-//                          (14 tics cold, 3 hot), because a hot emitter
-//                          relights fast.
+//     heat     DPS     what it is
+//     0-20      80     the sweeping band
+//     20-40    140
+//     40-60    240
+//     60-80    420
+//     80-100   750     the boss band
 //
-//   COOKING OFF HURTS.     Past 1.0 the beam cuts and the weapon vents,
-//                          locked, all the way back to stone cold.
+// Roughly x1.75 per rung, x9.4 end to end.
+//
+// WHY THIS CUTS FODDER LIKE A SHOTGUN BUT MAKES BOSSES A SIEGE, and it is
+// not two systems -- it is one curve read from both ends:
+//
+//   A zombieman is 20hp and dies in a quarter second in band 1. An imp is
+//   60hp, three quarters of a second. You never leave the bottom band, so
+//   sweeping a room of fodder costs almost NO HEAT -- the gun is still cold
+//   when the room is empty. That is the shotgun feeling: point, they fall,
+//   move on.
+//
+//   A Baron is 1000hp. Band 1 would need twelve and a half seconds and you
+//   cook off at four, so band 1 CANNOT kill it -- the weapon physically
+//   cannot brute-force a boss from cold. You have to climb, and climbing
+//   means holding, and holding is the thing that overheats you.
+//
+//   A full four-second hold from cold to cook-off delivers about 1300
+//   damage, of which the top band alone is 600. So nearly half a full
+//   burn's output lives in the last four fifths of a second, and reaching
+//   it costs you the five-second lockout if you misjudge by a hair.
+//
+// A Cyberdemon at 4000hp is three full burns and two lockouts: roughly
+// twenty-five seconds of committed, exposed, cannot-move-freely fire. Which
+// is the whole point, because the beam is also a flare that tells the room
+// exactly where you are standing.
+// ---------------------------------------------------------------------
 //
 // TWO HANDS, TWO BEAMS. LNC_Lance is mainhand and LNC_LanceOffhand is
-// offhand. Each owns its own beam slot, so firing one never disturbs the
-// other -- which is why stopping releases only its own slot rather than
-// calling ClearBeams().
+// offhand. Each owns its own beam slot and its own heat, so firing one
+// never disturbs the other -- which is why stopping releases only its own
+// slot rather than calling ClearBeams(). Alternating hands is a real
+// technique: one cools while the other burns.
 //
 // ENGINE DEPENDENCY, stated plainly: Level.SetBeam / SetBeamCount /
 // SetBeamLook are natives of this fork, and the tracked-hand positions
-// (AttackPos / OffhandPos / OverrideAttackPosDir) come from its VR
-// lineage. On stock GZDoom this file does not compile. That is the deal.
+// (AttackPos / OffhandPos / OverrideAttackPosDir) come from its VR lineage.
+// On stock GZDoom this file does not compile. That is the deal.
 // =====================================================================
 
 class LNC_Lance : Weapon
 {
-	// heat IS THE WEAPON. Everything visible and everything damaging is
-	// derived from it. It survives a trigger release on purpose; that is
-	// the entire pulse-fire technique.
-	int heat;
+	// HEAT IS THE WEAPON, and it is the only resource. Everything visible
+	// and everything damaging derives from it. A double rather than an int
+	// because the rates are per-second and the bands need to be crossed
+	// smoothly, not in whole-number jumps.
+	double heat;          // 0 .. LNC_HEAT_MAX
 
-	// Tics THIS pull has been held. Unlike heat this does reset on
-	// release, because it exists only to time the spin-up, which is a
-	// per-pull commitment cost rather than a property of the weapon.
-	int held;
+	// Tics remaining in the post-cook-off lockout. Counted down in DoEffect
+	// so it runs whether or not the weapon is selected -- switching hands to
+	// dodge your own cooldown would defeat the entire cost.
+	int lockTics;
 
-	bool locked;      // cooked off: refuses to fire until stone cold
-	bool firing;      // was the beam live last tic, for edge detection
+	bool firing;          // was the beam live last tic, for edge detection
 
-	// CONTINUOUS BURN, NOT SHOTS. Doom's damage is an integer event, but a
-	// beam's damage is a RATE -- so the rate is accumulated here as a real
-	// number every tic and spent when it has built a whole point. Nothing
-	// about the fiction is discrete; only the bookkeeping is.
+	// Fractional damage carried between tics. Doom's damage is an integer
+	// event but a beam's damage is a rate; this is where the remainder
+	// lives so the rate comes out exact rather than truncated to nothing.
 	double burn;
-	double cellDebt;
 
-	// HEAT UNITS, not tics -- the two rates differ, so a tic count could
-	// not express both. 280 at +2/tic is a 4.0s hold from cold to
-	// cook-off.
-	const LNC_OVERHEAT = 280;
-	const LNC_HEATRATE = 2;     // per tic, trigger down
-	const LNC_COOLRATE = 1;     // per tic, trigger up -- half, deliberately
-	const LNC_VENTRATE = 3;     // per tic while locked out after a cook-off
+	// GEAR-CHANGE PUNCH. Crossing into a new band is the most important
+	// thing that happens to this weapon while you hold it, and a colour
+	// swap alone is easy to miss when you are looking at what you are
+	// killing. Band changes therefore flash: the whole beam goes white and
+	// fat for a few tics. Reads in peripheral vision, which is where you
+	// actually are.
+	int lastBand;
+	int flashTics;
 
-	const LNC_SPINUP   = 14;    // 0.4s cold, ~0.1s hot
-	const LNC_RANGE    = 2200.0;
+	// ---- the heat model, all of it -------------------------------------
+	const LNC_HEAT_MAX  = 100.0;
+	const LNC_HEAT_RISE = 25.0;    // per second firing -> 4.0s cold to max
+	const LNC_HEAT_FALL = 12.5;    // per second idle   -> 8.0s max to cold
+	const LNC_LOCKOUT   = 175;     // tics -- a flat 5.0 seconds
 
-	// THE SYNTHETIC MUZZLE, FLAT PLAY ONLY. In VR the tracked controller is
-	// a real world position and Weapon.LaserBeamOffset handles it; on a
-	// desktop the weapon is a screen overlay with no world position, so the
-	// point the beam appears to leave has to be invented relative to the eye.
-	//
-	// THESE THREE ARE THE TUNING KNOBS. Right and up are what put the beam at
-	// the gun in the corner rather than in the middle of your face; forward
-	// is what keeps its halo off the camera. Right is positive because the
-	// weapon is drawn on the right; up is negative because it is drawn low.
-	// Eyeballed, not measured -- nudge them until the beam leaves the barrel.
+	const LNC_RANGE     = 2200.0;
+
+	// THE SYNTHETIC MUZZLE. In VR the tracked controller is a real world
+	// position; on a desktop the weapon is a screen overlay with no world
+	// position at all, so the point the beam appears to leave has to be
+	// built relative to the eye. These three are the tuning knobs: right and
+	// up put the beam at the gun in the corner rather than in the middle of
+	// your face, forward keeps its halo off the camera.
 	const LNC_MUZZLE_FWD   = 16.0;
 	const LNC_MUZZLE_RIGHT = 10.0;
 	const LNC_MUZZLE_UP    = -8.0;
-
-	// Base damage per shot before the charge ramp. RS_Main rolls this per
-	// weapon instance from its tier tables; standalone it is a constant so
-	// the weapon has no hidden state and behaves identically every pickup.
-	const LNC_DAMAGE   = 4;
 
 	Default
 	{
 		Tag "Lance";
 		Weapon.SelectionOrder 1080;
 		Weapon.SlotNumber 6;
-		Weapon.AmmoUse 0;        // spent manually per beam pulse, see A_LanceBeam
-		Weapon.AmmoGive1 60;
-		Weapon.AmmoType1 "Cell";
+
+		// NO AMMO, AT ALL. Not zero-cost ammo -- no ammo type. Heat is the
+		// only thing that stops you firing, which is what makes it the only
+		// thing worth thinking about.
+		Weapon.AmmoUse 0;
+		Weapon.AmmoGive1 0;
+		Weapon.AmmoType1 "";
+
 		Inventory.PickupMessage "You got the Lance!";
 		Inventory.Icon "PLASA0";
 		+WEAPON.NOHANDSWITCH;
+		+WEAPON.AMMO_OPTIONAL;
+		+WEAPON.NOALERT;
 
-		// WHERE THE BEAM LEAVES THE GUN. Stock property of this fork's
-		// Weapon class; the engine's own VR laser sight reads it too, so
-		// setting it here moves both together.
-		//
-		// COMPONENT ORDER, AND IT IS NOT XYZ: hw_weapon.cpp applies .Y
-		// along FORWARD and .X sideways (see the long note in A_LanceBeam).
-		// So this is "22 units out along the barrel, dead centre, on axis".
-		// THIS IS THE ONE NUMBER TO TUNE if the origin looks wrong.
+		// Where the beam leaves the gun in VR. Stock property of this fork's
+		// Weapon class; the engine's own laser sight reads it too, so setting
+		// it here moves both together. COMPONENT ORDER IS NOT XYZ --
+		// hw_weapon.cpp applies .Y along FORWARD and .X sideways.
 		Weapon.LaserBeamOffset (0.0, 22.0, 0.0);
 	}
 
-	// The one number. 0 = cold, 1 = about to cook off.
+	// 0 at stone cold, 1 at cook-off. Drives every visual.
 	clearscope double Charge() const
 	{
-		return clamp(double(heat) / double(LNC_OVERHEAT), 0.0, 1.0);
+		return clamp(heat / LNC_HEAT_MAX, 0.0, 1.0);
 	}
 
-	// A HOT EMITTER RELIGHTS FAST. Without this, pulse-firing would pay the
-	// full 0.4s dead window on every pull and the technique the heat model
-	// exists to enable would be strictly worse than just holding.
-	int SpinupNeeded() const
+	// Heat as the 0-100 number, for a HUD or a readout.
+	clearscope int HeatPercent() const
 	{
-		return int(LNC_SPINUP * (1.0 - 0.75 * Charge()));
+		return int(clamp(heat, 0.0, LNC_HEAT_MAX) + 0.5);
 	}
 
-	// DAMAGE PER SECOND, BACK-LOADED. Expressed as a RATE because that is
-	// what a beam has -- there is no "per shot" here, because there are no
-	// shots. c^1.5 rather than linear so the top of the ramp is somewhere
-	// you have to genuinely commit to reach; a linear curve hands out most
-	// of the payoff in the first second, which would make tapping optimal
-	// and the sustained beam pointless.
+	// Which of the five bands, 0-4. Exposed because the visuals step with
+	// it as well -- the beam should look like it changed gear, not merely
+	// like it got slightly brighter.
+	clearscope int Band() const
+	{
+		if (heat < 20.0) return 0;
+		if (heat < 40.0) return 1;
+		if (heat < 60.0) return 2;
+		if (heat < 80.0) return 3;
+		return 4;
+	}
+
+	// FLAT WITHIN EACH BAND, as specified. Not a smooth curve: the steps are
+	// the point. You should be able to FEEL the gear change -- a smooth ramp
+	// gives you no moment to recognise, so there is nothing to aim for and
+	// nothing to hold at.
 	//
-	// 14 DPS the instant the beam bites, 210 at the edge of cook-off.
+	// x1.75 per rung. See the header for why this shape splits fodder from
+	// bosses without needing a second system to do it.
 	double DPS() const
 	{
-		double c = Charge();
-		return 14.0 + 196.0 * (c * sqrt(c));
+		switch (Band())
+		{
+			case 0:  return 80.0;
+			case 1:  return 140.0;
+			case 2:  return 240.0;
+			case 3:  return 420.0;
+			default: return 750.0;
+		}
 	}
 
-	// Cells per second, likewise a rate. Climbs with charge, so a hot beam
-	// is expensive to hold as well as dangerous.
-	double CellsPerSec() const
-	{
-		return 6.0 + 8.0 * Charge();
-	}
-
-	// Which beam slot this gun owns. Two hands, two slots, so one hand's
-	// beam can never blink the other's out.
+	// ---- BEAM SLOT BUDGET ----------------------------------------------
+	//
+	// Eight slots exist, level-global, and each one costs a per-pixel
+	// segment test across the whole screen -- twice, once for surface
+	// lighting and once for the glow in the air. So they are a budget, not
+	// a free ceiling, and this weapon spends all of it:
+	//
+	//     0        mainhand core beam
+	//     1        offhand core beam
+	//     2,3,4    mainhand helix
+	//     5,6,7    offhand helix
+	//
+	// Three chords is a coarse helix -- each spans 120 degrees of the turn
+	// -- but chords are exactly what a beam slot IS, and three rotating
+	// ones read as a twisting ribbon wrapped round the core rather than as
+	// a triangle. Splitting them evenly rather than giving one hand a finer
+	// spiral keeps the two hands identical, which matters more.
 	int BeamSlot()
 	{
 		if (owner && owner.player && owner.player.OffhandWeapon == self) return 1;
 		return 0;
 	}
 
-	// ---- the beam itself -------------------------------------------------
+	int HelixBase() { return BeamSlot() == 1 ? 5 : 2; }
+	const LNC_HELIX_CHORDS = 3;
+
+	// ---- the spiral -----------------------------------------------------
 	//
-	// Called once per tic while the trigger is down. Traces, draws, damages.
+	// A helix around the beam axis, drawn as a chain of straight chords --
+	// the Quake 2 railgun trick, except these are real lights that brighten
+	// the walls they pass, not a sprite trail.
+	//
+	// Consecutive chords share endpoints, so the polyline is CONTINUOUS: no
+	// gaps to read as beads. It faceted rather than curved, which at this
+	// thickness and glow is invisible.
+	//
+	// THE BASIS IS BUILT FROM THE AXIS AND NOTHING ELSE. No hand matrices,
+	// no cvars, no engine conventions to mirror -- just "any two directions
+	// perpendicular to this line". Getting it wrong can only make the
+	// spiral wobble; it cannot move the core beam, which is drawn from
+	// `from` and `to` directly and never touches this.
+	void DrawHelix(Vector3 a, Vector3 b, double radius, double turns,
+		double phase, Color col, double thick, double soft, double inten)
+	{
+		Vector3 axis = b - a;
+		double len = axis.Length();
+		if (len < 2.0) return;
+		axis /= len;
+
+		// Any perpendicular will do. Cross with world up unless the beam IS
+		// world up, in which case cross with something else.
+		Vector3 u = ((0, 0, 1) cross axis);
+		if (u dot u < 1e-6) u = ((1, 0, 0) cross axis);
+		double ul = u.Length();
+		if (ul < 1e-6) return;
+		u /= ul;
+		Vector3 v = (axis cross u);      // unit by construction: both unit, perpendicular
+
+		int base = HelixBase();
+		for (int i = 0; i < LNC_HELIX_CHORDS; i++)
+		{
+			double t0 = double(i) / LNC_HELIX_CHORDS;
+			double t1 = double(i + 1) / LNC_HELIX_CHORDS;
+			double a0 = phase + turns * 360.0 * t0;
+			double a1 = phase + turns * 360.0 * t1;
+
+			Vector3 p0 = a + axis * (len * t0) + (u * cos(a0) + v * sin(a0)) * radius;
+			Vector3 p1 = a + axis * (len * t1) + (u * cos(a1) + v * sin(a1)) * radius;
+
+			level.SetBeam(base + i, p0, p1, thick, soft, col, inten);
+		}
+	}
+
+	void ClearHelix()
+	{
+		int base = HelixBase();
+		for (int i = 0; i < LNC_HELIX_CHORDS; i++)
+			level.SetBeam(base + i, (0, 0, 0), (0, 0, 0), 0.01, 0.01, 0, 0.0);
+	}
+
+	// ---- colour ---------------------------------------------------------
+	//
+	// Five bands, five genuinely different colours rather than five steps
+	// along one ramp -- the band is information and it should be readable at
+	// a glance, in peripheral vision, while you are looking at something
+	// else. A blue beam and an orange beam are not the same weapon.
+	//
+	// Blue to cyan to white is "cold and building"; gold to furnace-red is
+	// "this is about to cost you". The core carries the heat, and the helix
+	// carries the contrast against it.
+	Color CoreColor() const
+	{
+		switch (Band())
+		{
+			case 0:  return 0x1E6BFF;   // deep electric blue
+			case 1:  return 0x00E5FF;   // cyan
+			case 2:  return 0xEAFFFF;   // hard white, faintly cold
+			case 3:  return 0xFFD21E;   // gold
+			default: return 0xFF3C00;   // furnace
+		}
+	}
+
+	// Deliberately NOT a lighter version of the core. The spiral should be a
+	// separate object wrapped around the beam, and the only way three thin
+	// chords read as separate at speed is if they are a different colour.
+	// The top band's magenta on furnace-red is the loudest thing the weapon
+	// ever does, which is correct: it is also the most dangerous.
+	Color HelixColor() const
+	{
+		switch (Band())
+		{
+			case 0:  return 0x9FD8FF;   // pale blue
+			case 1:  return 0xC8FFF4;   // pale aqua
+			case 2:  return 0xFFE79A;   // warm gold against the white core
+			case 3:  return 0xFF7A18;   // orange against gold
+			default: return 0xFF00B4;   // magenta against furnace
+		}
+	}
+
+	// ---- the beam ------------------------------------------------------
+	//
+	// Called once per tic while the trigger is down. Traces, draws, burns.
 	action void A_LanceBeam()
 	{
 		let w = LNC_Lance(invoker);
 		if (!w || !self || !player) return;
 
-		w.held++;
-		w.heat += LNC_HEATRATE;
+		// Heat climbs from the very first tic. There is no free window --
+		// with no ammo, heat is the only cost the weapon has, so nothing
+		// about firing may be free.
+		w.heat += LNC_HEAT_RISE / 35.0;
 
-		if (w.heat >= LNC_OVERHEAT)
+		if (w.heat >= LNC_HEAT_MAX)
 		{
 			w.Overheat(self);
 			return;
@@ -190,36 +329,21 @@ class LNC_Lance : Weapon
 
 		// WHERE IT ENDS -- and this trace does NO damage.
 		//
-		// It answers "what is the beam's far end", a geometry question, and
-		// hands back the exact direction it used so the damage below can
-		// travel the identical ray. Two questions, one trace.
+		// TRF_THRUACTORS on purpose: the beam is DRAWN to the wall behind
+		// whatever it is burning through, not stopped short at the first
+		// monster. The damage trace below is a separate question.
 		//
-		// TRF_THRUACTORS on purpose: the beam should be drawn to the WALL
-		// behind whatever it is burning through, not stop short at the
-		// first monster.
-		//
-		// TRF_USEWEAPON is what makes it a VR weapon rather than a head
-		// weapon. Without it, P_LineTrace ignores the tracked hand entirely
-		// and traces from `angle`/`pitch` (BODY yaw/pitch) starting at eye
-		// height -- so the drawn beam would aim wherever the HEAD looked
-		// while the gun model aimed wherever the HAND did. With it,
-		// fromPos becomes AttackPos/OffhandPos and the direction comes from
-		// the hand's matrix. Passing `angle`/`pitch` UNCHANGED is correct:
-		// AttackDir internally subtracts the actor's own body angle/pitch
-		// before applying the hand transform, so the subtraction nets to
-		// zero and no deviation is added. TRF_ISOFFHAND only when this copy
-		// is the offhand Lance, or an offhand shot traces from the mainhand
-		// controller.
+		// TRF_USEWEAPON is what makes it a weapon ray rather than a head
+		// ray: without it P_LineTrace ignores the tracked hand and traces
+		// from body yaw/pitch at eye height. TRF_ISOFFHAND only when this
+		// copy is the offhand, or it would trace from the other controller.
 		int trf = TRF_THRUACTORS | TRF_USEWEAPON;
 		if (w.BeamSlot() == 1) trf |= TRF_ISOFFHAND;
 
-		// player.viewheight IS STILL NEEDED even though the VR branch above
-		// ignores it. P_LineTrace only reaches for AttackPos/OffhandPos when
-		// OverrideAttackPosDir is actually set (a real headset, or
-		// vr_override_weap_pos); flat/desktop play falls through to
-		// P_LineTrace's OTHER branch, `fromPos = t1->PosAtZ(startz)`, where
-		// startz is built from this offset. Drop it and that branch starts
-		// the trace at the FLOOR instead of the eye.
+		// player.viewheight is still needed: P_LineTrace only reaches for
+		// AttackPos when OverrideAttackPosDir is set, and otherwise falls
+		// through to `fromPos = t1->PosAtZ(startz)` built from this offset.
+		// Drop it and that branch starts the trace at the FLOOR.
 		FLineTraceData d;
 		bool hit = LineTrace(angle, LNC_RANGE, pitch, trf, player.viewheight, data: d);
 
@@ -227,114 +351,38 @@ class LNC_Lance : Weapon
 		Vector3 from = offhand ? OffhandPos : AttackPos;
 
 		// THE DIRECTION COMES FROM THE TRACE, NOT FROM A SECOND CALCULATION.
-		//
-		// FLineTraceData.HitDir is trace.HitVector (p_map.cpp:5404), the
-		// unit direction P_LineTrace actually travelled -- already through
-		// the VR branch that swaps in the tracked hand's matrix. It is
-		// filled unconditionally, on a miss as well as a hit.
-		//
-		// Reconstructing this with AttackDir(self, angle, pitch) instead is
-		// a bug that has been written into this weapon twice, and the second
-		// time it drew the beam at ninety degrees to where the gun pointed.
-		// Any independently-derived direction is a second opinion that can
-		// disagree with the trace. Reading HitDir makes the drawn beam and
-		// the damage physically incapable of pointing different ways.
-		// NORMALIZED DEFENSIVELY. It is only used to build the miss endpoint
-		// below, where a non-unit vector would multiply LNC_RANGE into a
-		// wildly overshot segment -- and "is this actually unit length" is
-		// exactly the assumption that cost two rounds of debugging.
+		// HitDir is the unit direction P_LineTrace actually travelled, filled
+		// unconditionally. Reconstructing it independently is a bug this
+		// weapon has shipped twice; the second time it drew the beam at
+		// ninety degrees to the gun. Normalised defensively because "is this
+		// unit length" was the unchecked assumption under both.
 		Vector3 dir = d.HitDir;
 		double dirLen = dir.Length();
 		dir = (dirLen > 0.001) ? dir / dirLen : (0, 0, 0);
 
 		// ON A MISS, d.HitLocation IS THE MAP ORIGIN (0,0,0), NOT "NO
-		// ANSWER". P_LineTrace zeroes its result struct before tracing and
-		// only fills HitLocation through the successful branch. A held-open
-		// sky would otherwise point the beam at world (0,0,0), which for a
-		// player standing any distance from the map origin is a wildly wrong
-		// endpoint -- exactly the kind of stray segment that grazes the
-		// camera and washes the screen out.
+		// ANSWER" -- P_LineTrace zeroes its struct and only fills the field
+		// through the successful branch. Firing at open sky would otherwise
+		// aim the beam at world origin.
 		Vector3 to;
-		if (hit)
-		{
-			to = d.HitLocation;
-		}
-		else if (dir dot dir > 1e-8)
-		{
-			to = from + dir * LNC_RANGE;
-		}
-		else
-		{
-			// No endpoint and no direction: draw nothing rather than guess.
-			w.Release(self);
-			return;
-		}
+		if (hit)                        to = d.HitLocation;
+		else if (dir dot dir > 1e-8)    to = from + dir * LNC_RANGE;
+		else { w.Release(self); return; }
 
-		if (dir dot dir < 1e-8)
-		{
-			Vector3 seg = to - from;
-			double segLen = seg.Length();
-			if (segLen > 0.001) dir = seg / segLen;
-		}
-
-		// ====================================================================
-		// THE DRAW ORIGIN IS *NOT* THE TRACE ORIGIN.
-		//
-		// AttackPos/OffhandPos is the tracked CONTROLLER -- your fist. The
-		// gun model extends forward from there, so a beam drawn from that
-		// point is born INSIDE the weapon and exits through the barrel,
-		// passing lengthwise through the whole model on its way out. Worse,
-		// the halo reaches thick + soft*8 world units (main.fp's own
-		// bounding reject uses exactly that), which at high charge is ~48
-		// units -- most of a player's height. Starting that at arm's length
-		// from the eye engulfs the camera and washes the screen white.
-		//
-		// SLIDE ALONG THE SEGMENT WE ALREADY HAVE. `from` and `to` are both
-		// authoritative -- one is the trace's origin, the other its result --
-		// so a point between them is on the beam line BY CONSTRUCTION. No
-		// direction, no basis vectors, no cvars: nothing that can disagree.
-		//
-		// LaserBeamOffset.Y IS THE DISTANCE, and Y is not a typo. The engine
-		// reads this same property to place its VR laser sight, and
-		// hw_weapon.cpp applies the .Y component along FORWARD (it builds
-		// totalOffset as (laser_y + weap.Y, ...) and applies .X of that along
-		// the forward axis). Keeping the weapon's number in the same field
-		// the engine reads means the beam and the sight stay together.
-		//
-		// AN EARLIER VERSION mirrored the engine's full forward/side/up basis
-		// so a sideways offset would work too. It broke: the shot went where
-		// the gun pointed and hit correctly, and the DRAWN beam started at
-		// that hit point and ran off sideways -- a lateral displacement,
-		// which is exactly what the `side` term contributes and nothing else
-		// does. Three extra inputs to support an offset that is zero
-		// sideways and zero up. This version cannot displace laterally at
-		// all, and the clamp keeps it from ever passing the endpoint.
-		//
-		// The trace is untouched. Only where the beam is DRAWN from moves.
-		// ====================================================================
-		// THE BEAM LEAVES THE BARREL. Both modes, no exceptions.
-		//
-		// VR: AttackPos/OffhandPos IS the tracked controller, so the muzzle
-		// is that point pushed forward down the barrel. Pushed ALONG the real
-		// segment so it cannot leave the beam line.
-		//
-		// FLAT: AttackPos is the EYE (VRMode::SetUp's else branch sets it to
-		// PosAtZ(shootz)), and the weapon is a screen overlay with no world
-		// position -- so the muzzle has to be built: eye, pushed forward,
-		// right and down to where the gun is actually drawn. The forward axis
-		// is the view axis, which in flat play IS the weapon's orientation.
-		//
-		// Plain degree trig on the body angles. No hand matrices, no cvars,
-		// no cross products. Doom convention: angle 0 is +X, 90 is +Y, and
-		// positive pitch looks DOWN -- hence the -sin on forward's Z.
+		// THE BEAM LEAVES THE BARREL. `from` is the controller in VR and the
+		// EYE on a desktop (VRMode::SetUp's else branch sets AttackPos to
+		// PosAtZ(shootz)) -- and on a desktop the gun is a screen overlay
+		// with no world position, so the muzzle has to be built: eye, pushed
+		// forward, right and down to where the weapon is actually drawn.
+		// Plain degree trig on the body angles, which are the aim. Doom
+		// convention: angle 0 is +X, 90 is +Y, positive pitch looks DOWN.
 		Vector3 drawFrom;
 		double hitDist = (to - from).Length();
 
 		if (OverrideAttackPosDir)
 		{
 			double frac = (hitDist > 0.001)
-				? clamp(w.LaserBeamOffset.Y / hitDist, 0.0, 0.5)
-				: 0.0;
+				? clamp(w.LaserBeamOffset.Y / hitDist, 0.0, 0.5) : 0.0;
 			drawFrom = from + (to - from) * frac;
 		}
 		else
@@ -342,59 +390,67 @@ class LNC_Lance : Weapon
 			double ca = cos(angle), sa = sin(angle);
 			double cp = cos(pitch), sp = sin(pitch);
 			Vector3 fwd   = (ca * cp, sa * cp, -sp);
-			Vector3 right = (sa, -ca, 0);        // angle - 90, horizontal
-
-			double fwdAmt = min(LNC_MUZZLE_FWD, hitDist * 0.5);
+			Vector3 right = (sa, -ca, 0);
 			drawFrom = from
-				+ fwd * fwdAmt
+				+ fwd * min(LNC_MUZZLE_FWD, hitDist * 0.5)
 				+ right * LNC_MUZZLE_RIGHT
 				+ (0, 0, 1) * LNC_MUZZLE_UP;
 		}
 
-		// ---- shape, and it is all one number --------------------------------
+		// ---- shape ---------------------------------------------------------
 		double charge = w.Charge();
+		int band = w.Band();
 
-		// THE BLOOM CEILING. The fork's beam doc notes the air glow "feeds
-		// bloom without being told to, since a core burning past white is
-		// exactly what the bloom pass thresholds for". So intensity stays
-		// under 1.0 for the entire working range and only crosses it in the
-		// last few percent before cook-off -- at which point the screen
-		// washing out IS the warning, rather than the weapon's baseline.
-		double thick = 1.1 + 3.4 * charge;
-		double soft  = 1.3 + 4.0 * charge;
-		double inten = 0.30 + 0.72 * charge;
+		// THE GEAR CHANGE. Crossing a band is the event that matters most
+		// while the trigger is down, so it gets its own punch rather than
+		// relying on you noticing a colour swap in your periphery.
+		if (band != w.lastBand)
+		{
+			if (band > w.lastBand) w.flashTics = 5;
+			w.lastBand = band;
+		}
+		double flash = w.flashTics > 0 ? double(w.flashTics) / 5.0 : 0.0;
+		if (w.flashTics > 0) w.flashTics--;
 
-		// Cold blue-white, to hard white, to amber, to a bad orange. The
-		// colour is the heat gauge, and it is what makes the state legible
-		// without looking away from the target. White owns the broad middle
-		// where the weapon is comfortable; the last third is where it
-		// visibly stops being.
-		Color col;
-		if (charge < 0.35)
-			col = LNC_Lance.LerpCol(0xA0C8FF, 0xE8F4FF, charge / 0.35);
-		else if (charge < 0.70)
-			col = LNC_Lance.LerpCol(0xE8F4FF, 0xFFD070, (charge - 0.35) / 0.35);
-		else
-			col = LNC_Lance.LerpCol(0xFFD070, 0xFF6020, (charge - 0.70) / 0.30);
+		// THE BEAM STEPS WITH THE BAND, not smoothly with heat. The damage
+		// changes in gears, so the look changes in gears -- a beam that grew
+		// imperceptibly would give you nothing to read, and reading it is
+		// how you know when to let go. Within a band it still creeps a
+		// little so it never looks frozen.
+		double step = double(band);
+		double thick = 1.2 + 0.95 * step + 0.30 * charge + 2.2 * flash;
+		double soft  = 1.5 + 1.15 * step + 0.40 * charge + 2.6 * flash;
+
+		// INTENSITY STAYS UNDER 1.0 UNTIL THE TOP BAND. The fork's beam doc
+		// notes the air glow feeds bloom by itself "since a core burning past
+		// white is exactly what the bloom pass thresholds for". So the screen
+		// only blooms out in band 5, where it is the warning rather than the
+		// weapon's baseline appearance -- and for the few tics of a gear
+		// change, where blowing out IS the announcement.
+		double inten = 0.34 + 0.17 * step + 0.55 * flash;
+
+		// The colour IS the gauge; you read your heat off the beam without
+		// looking away from what you are killing. Washed toward white for the
+		// duration of a gear change.
+		Color col = LNC_Lance.LerpCol(w.CoreColor(), 0xFFFFFF, flash);
 
 		// FRAME-GLOBAL, BOTH OF THESE. SetBeamCount's glow term and every
-		// SetBeamLook value cover EVERY beam in the scene, not just this
-		// one -- they are single vec4s in the viewpoint block, not arrays.
-		// This weapon is the only beam user in a standalone load; if you add
-		// another, these become shared state and want one owner rather than
-		// each actor stomping the others every tic.
-		level.SetBeamCount(2, 0.28, 1.0);
+		// SetBeamLook value cover EVERY beam in the scene -- they are single
+		// vec4s in the viewpoint block, not arrays. If a second beam user
+		// ever exists, these want one owner rather than each actor stomping
+		// the others every tic.
+		// EIGHT, because the helix lives in the upper six. Unused slots are
+		// zeroed on release rather than left holding stale endpoints, or a
+		// holstered hand's spiral would keep being drawn.
+		level.SetBeamCount(8, 0.28, 1.0);
 
-		// Air glow is what makes it a laser rather than a spotlight -- the
-		// beam is visible hanging in the air, not just a bright patch where
-		// it lands. Scroll matters more than it sounds: a held beam with
-		// nothing travelling along it goes static within a second and the
-		// eye stops believing it carries anything. Taper slackens as it
-		// heats -- a cold beam is tight at the aperture, a hot one has lost
-		// its discipline and is nearly parallel-sided.
 		level.SetBeamLook(
 			0.45 + 0.55 * charge,         // air glow
-			5.0 + 11.0 * charge,          // scroll speed
+
+			// SCROLL SPEED is irrelevant while depth is zero, but kept
+			// non-zero so turning depth back on does not also need this.
+			6.0,
+
 			// SCROLL DEPTH: ZERO, AND IT STAYS ZERO.
 			//
 			// This is the beading. main.fp does
@@ -402,75 +458,89 @@ class LNC_Lance : Weapon
 			// and that sine is the ONLY periodic term in the entire beam
 			// shader -- BeamLightAt, the surface half, is pure distance
 			// falloff with nothing repeating in it. Wavelength is
-			// 2*pi/0.06 ~= 105 world units, so across an ordinary room it is
-			// about ten bright/dark bands: (gun) -0-0-0-0-0-.
-			//
-			// Any nonzero value puts them back. Reducing it only made them
-			// fainter, which is not the same as a beam. A capital-ship lance
-			// is one solid unbroken bar of light, and the shader draws exactly
-			// that the moment this term is switched off.
-			//
-			// The engine skips the whole block on zero (`if (uBeamFX.y > 0)`),
-			// so this is genuinely off, not merely small.
-			0.0,                          // scroll depth -- see above
-			0.45 - 0.30 * charge,         // taper, slackening
-			1.2 + 1.40 * charge);         // impact flare
+			// 2*pi/0.06 ~= 105 world units, so across a room it is about ten
+			// bright/dark bands: (gun) -0-0-0-0-0-. Reducing it only made
+			// them fainter, which is not the same as a beam. A capital-ship
+			// lance is one solid unbroken bar, and the shader draws exactly
+			// that the moment this is switched off. The engine skips the
+			// whole block on zero, so this is genuinely off, not small.
+			0.0,
+
+			0.45 - 0.30 * charge,         // taper, slackening as it heats
+			1.2 + 0.35 * step);           // impact flare, stepping with band
 
 		level.SetBeam(w.BeamSlot(), drawFrom, to, thick, soft, col, inten);
 
-		// ====================================================================
-		// THE VOLUMETRIC LAYER -- the beam as a shaft of lit air with dust in
-		// it, on top of the segment light.
+		// ---- THE SPIRAL -----------------------------------------------------
 		//
-		// SetBeam draws a line that lights the room. SetVolumetricBeam (§4) is
-		// a different system: a raymarched CONE with world-space dust motes
-		// that stay put as you move through them. Aimed straight down the
-		// beam with a very narrow cone, it stops being a spotlight and becomes
-		// the air around the beam glowing, with motes drifting through it.
+		// Not present in band 0. That is deliberate and it is the single best
+		// thing about it: a cold beam is one clean thin line, and the spiral
+		// APPEARS the moment you gear up. So the weapon visibly grows a
+		// second component rather than merely getting brighter, and you can
+		// see at a glance whether the thing in your hands is the sweeping
+		// tool or the boss-killer.
 		//
-		// That is the difference between a bright line and something that
-		// looks like it is displacing atmosphere.
+		// It tightens, widens and spins faster with every band. At the top it
+		// is a magenta braid whipping around a furnace-red core, which is
+		// exactly as subtle as a weapon that is two thirds of a second from
+		// cooking off should be.
+		if (band > 0)
+		{
+			// Spin is in degrees per tic and steps hard with the band, so
+			// gearing up is audible in the eye as well: the whole spiral
+			// jumps to a new speed.
+			double spin  = Level.maptime * (7.0 + 5.0 * step);
+			double radius = 1.8 + 1.15 * step + 3.0 * flash;
+			double turns  = 0.85 + 0.30 * step;
+
+			w.DrawHelix(drawFrom, to, radius, turns, spin,
+				LNC_Lance.LerpCol(w.HelixColor(), 0xFFFFFF, flash),
+				0.45 + 0.22 * step,               // thin: it is a filament
+				0.70 + 0.45 * step + 1.2 * flash, // but it glows generously
+				0.30 + 0.14 * step + 0.5 * flash);
+		}
+		else
+		{
+			w.ClearHelix();
+		}
+
+		// THE VOLUMETRIC LAYER -- the air around the beam, not the beam.
 		//
-		// MAINHAND ONLY. Unlike the eight beam slots, the volumetric beam is a
-		// SINGLE global (one VolBeamActive and one set of fields on the level),
-		// so two hands cannot each have one -- the second would simply
-		// overwrite the first every tic and flicker. The mainhand claims it
-		// and the offhand goes without; the offhand still has its own real
-		// beam in slot 1, which is the part that matters.
+		// SetBeam draws a line that lights the room. SetVolumetricBeam is a
+		// different system: a raymarched cone that makes the air itself glow.
+		// Aimed straight down the beam with a pencil-thin cone it stops being
+		// a bright line and becomes something displacing atmosphere.
+		//
+		// MAINHAND ONLY. Unlike the eight beam slots this is a SINGLE global
+		// on the level, so two hands would overwrite each other every tic and
+		// flicker. The offhand still has its own real beam in slot 1.
+		//
+		// DUST IS ZERO. Motes are, definitionally, points of light, and
+		// points of light along the beam are the exact thing being hunted out
+		// of this weapon. If it comes back it comes back as atmosphere in the
+		// ROOM, never as texture on the bar.
 		if (!offhand)
 		{
 			Vector3 vseg = to - drawFrom;
 			double vlen = vseg.Length();
 			if (vlen > 1.0)
 			{
-				// inner/outer are CONE HALF-ANGLES IN DEGREES (hw_drawinfo
-				// feeds them through cos()). Kept tiny -- a laser is a
-				// pencil, not a torch -- and widening slightly with heat.
 				level.SetVolumetricBeam(
-					drawFrom,
-					vseg / vlen,
-					col,
-					0.25 + 0.35 * charge,     // inner angle
-					1.10 + 1.60 * charge,     // outer angle
-					vlen,                     // length: exactly the segment
-					0.30 + 0.45 * charge,     // density
-					1.6,                      // falloff, concentrated near the lens
-					// DUST OFF FOR NOW. Motes are, definitionally, points of
-					// light -- and points of light along the beam are the
-					// exact thing being hunted out of this weapon. Bring it
-					// back only once the bar itself reads as solid, and then
-					// as atmosphere in the ROOM rather than texture on the
-					// beam.
-					0.0,                      // dust amount
-					0.045,                    // dust mote scale
-					2.0 + 7.0 * charge);      // dust drift, faster as it heats
+					drawFrom, vseg / vlen, col,
+					0.25 + 0.30 * charge,     // inner cone half-angle, degrees
+					1.10 + 1.40 * charge,     // outer
+					vlen,                     // exactly the segment
+					0.28 + 0.40 * charge,     // density
+					1.6,                      // falloff, tight near the lens
+					0.0,                      // dust: see above
+					0.045,
+					0.0);
 			}
 		}
 
-		// THE SOUND RISES WITH THE HEAT. Started once on the trigger edge and
-		// pitched every tic after, so the overheat is audible before it is
-		// visible -- which matters, because you are usually looking at what
-		// you are shooting rather than at the beam.
+		// Started once on the trigger edge and pitched every tic after, so
+		// the approaching cook-off is audible before it is visible -- you are
+		// usually looking at what you are burning, not at the beam.
 		if (!w.firing)
 		{
 			A_StartSound("lnc/charge", CHAN_WEAPON, 0, 0.7);
@@ -479,51 +549,17 @@ class LNC_Lance : Weapon
 		}
 		A_SoundPitch(CHAN_5, 0.85 + 0.55 * charge);
 
-		// ====================================================================
-		// THE BURN. NO SHOTS, NO PUFFS, NO CADENCE.
+		// ---- the burn --------------------------------------------------
 		//
-		// This is the whole point of the weapon and it is what the earlier
-		// version got wrong. It delivered damage as 8-17 discrete LineAttacks
-		// a second, each spawning a puff -- so no matter how the puff was
-		// tuned down, the weapon behaved like a very fast machine gun wearing
-		// a beam as a costume. Hiding the puff was treating the symptom.
+		// NO SHOTS. The beam is on, and while it is on it deposits energy at
+		// a rate. The rate is accumulated as a real number and spent when it
+		// builds a whole point, so the fiction is continuous and only the
+		// bookkeeping is not.
 		//
-		// A beam does not fire. It is ON, and while it is on it deposits
-		// energy at a RATE. Doom's damage is an integer event, so the rate is
-		// accumulated as a real number every tic and spent when it has built
-		// a whole point. The fiction is continuous; only the bookkeeping is
-		// not, and the bookkeeping is invisible.
-		//
-		// The consequences are all the ones that were missing: no impact
-		// stutter, no puff spam, no ammo popping a cell at a time, damage
-		// that scales smoothly with charge instead of in cadence steps, and a
-		// weapon that reads as burning something rather than shooting it.
-		//
-		// NOTHING AT ALL DURING SPIN-UP. The first tenths of a second are a
-		// targeting laser: visible, aimable, and harmless. That is the
-		// commitment cost, and SpinupNeeded() shortens it as the weapon heats.
-		if (w.held <= w.SpinupNeeded()) return;
-
-		// AMMO IS A RATE TOO. Cells drain continuously rather than one per
-		// shot -- there is no shot to hang the spend on any more.
-		w.cellDebt += w.CellsPerSec() / 35.0;
-		while (w.cellDebt >= 1.0)
-		{
-			w.cellDebt -= 1.0;
-			if (CountInv("Cell") <= 0)
-			{
-				w.cellDebt = 0;
-				w.Release(self);
-				A_StartSound("lnc/empty", CHAN_AUTO);
-				return;
-			}
-			A_TakeInventory("Cell", 1);
-		}
-
-		// WHAT IS BEING BURNED. A SECOND trace, without TRF_THRUACTORS, so it
-		// stops at the first thing in the way -- the drawing trace above
-		// deliberately passes through actors to reach the wall behind them,
-		// which is right for the visual and wrong for the damage.
+		// A SECOND TRACE, without TRF_THRUACTORS, so it stops at the first
+		// thing in the way -- the drawing trace above deliberately passes
+		// through actors to reach the wall behind them, which is right for
+		// the picture and wrong for the damage.
 		int dtrf = TRF_USEWEAPON;
 		if (offhand) dtrf |= TRF_ISOFFHAND;
 		FLineTraceData hitData;
@@ -532,8 +568,8 @@ class LNC_Lance : Weapon
 		Actor victim = hitData.HitActor;
 		if (!victim || !victim.bShootable)
 		{
-			// Nothing in the beam: hold the accumulator so a target swept
-			// through the beam is not handed a free stored-up lump of damage.
+			// Nothing in the beam. Drop the remainder rather than banking it,
+			// or sweeping onto a target would hand it a stored-up lump.
 			w.burn = 0;
 			return;
 		}
@@ -543,14 +579,11 @@ class LNC_Lance : Weapon
 		if (whole <= 0) return;
 		w.burn -= whole;
 
-		// DMG_NO_PAIN so a held beam does not lock a monster in its pain
-		// state forever. At this tick rate the flinching would be permanent
-		// and the target would never act -- which trivialises every fight and
-		// looks broken besides. It still bleeds and it still dies.
+		// DMG_NO_PAIN, or a held beam pins a monster in its pain state
+		// permanently and it never acts again -- which trivialises every
+		// fight and looks broken besides. It still bleeds and still dies.
 		victim.DamageMobj(self, self, whole, 'Hitscan', DMG_NO_PAIN);
 
-		// A quiet sizzle, occasionally, so burning something is audible
-		// without becoming a tone at thirty-five hits a second.
 		if (Random(0, 11) == 0)
 			A_StartSound("lnc/sizzle", CHAN_AUTO, CHANF_DEFAULT, 0.3);
 	}
@@ -570,69 +603,77 @@ class LNC_Lance : Weapon
 		if (firing)
 		{
 			// CHAN_5, MATCHING THE LOOP. Stopping a different channel than
-			// the one the loop was started on leaves a looping sound running
-			// forever -- which is exactly what the original did.
+			// the loop was started on leaves it running forever.
 			if (who) who.A_StopSound(CHAN_5);
 			firing = false;
 		}
 		level.SetBeam(BeamSlot(), (0, 0, 0), (0, 0, 0), 0.01, 0.01, 0, 0.0);
 
-		// The volumetric layer is a single global with no "slot" to zero, so
-		// it has to be switched off explicitly -- and only by the hand that
+		// This hand's three helix chords too. The count stays at 8 once
+		// anything has fired, so a slot left holding real endpoints would go
+		// on being drawn after the trigger came up.
+		ClearHelix();
+
+		// The volumetric layer is a single global with no slot to zero, so it
+		// must be switched off explicitly -- and only by the hand that
 		// claimed it, or the offhand releasing would kill the mainhand's.
 		if (BeamSlot() == 0)
 			level.ClearVolumetricBeam();
 
-		// Drop any part-accumulated burn. Holding a fraction across a release
-		// would let rapid tapping bank damage between pulls.
+		// Heat is NOT reset. That is the whole pulse-fire technique: the band
+		// you climbed to survives the release and only bleeds off with time.
 		burn = 0;
-		cellDebt = 0;
-
-		// held resets; heat DOES NOT. That one line is the entire pulse-fire
-		// technique -- the ramp you built survives the release and only the
-		// per-pull spin-up is paid again.
-		held = 0;
 	}
 
 	void Overheat(Actor who)
 	{
 		Release(who);
-		locked = true;
-		heat = LNC_OVERHEAT;
+		heat = LNC_HEAT_MAX;
+		lockTics = LNC_LOCKOUT;
 		if (who) who.A_StartSound("lnc/cookoff", CHAN_WEAPON, 0, 1.0);
 	}
 
-	// Heat bleeds whenever the trigger is not down, at half the rate it
-	// built -- 4.0s to cook from cold, 8.0s to fall all the way back. That
-	// asymmetry is what makes short pulses cheap and long ones committing.
+	// COOK-OFF IS A FLAT FIVE SECONDS AND THEN STONE COLD, rather than a
+	// slow bleed down from 100. A bleed would let you cook off and go
+	// straight back to band 4, which makes overheating nearly free; a hard
+	// reset means the mistake costs you the entire climb as well as the five
+	// seconds.
 	//
-	// A COOK-OFF VENTS FASTER but is locked for the whole descent, so it
-	// costs about 2.8 seconds of holding a dead gun rather than the 9.3 the
-	// bleed rate alone would impose.
+	// Ordinary cooling is half the rise rate -- 8 seconds from full -- so
+	// short bursts cost almost nothing and long holds genuinely commit.
+	//
+	// COUNTED IN DoEffect so it runs whether or not the weapon is selected.
+	// Switching to your other hand while this one cools is intended (that is
+	// the two-hand rhythm), but switching AWAY must not pause the timer, or
+	// the lockout would be free.
 	override void DoEffect()
 	{
 		Super.DoEffect();
 
-		// SAFETY: the beam is drawn into a level-global slot, so anything
-		// that ends a trigger pull WITHOUT running the Beam state's exit --
-		// dying mid-burst, a forced weapon swap, being telefragged -- would
-		// leave a live segment hanging in the world and a looping sound
-		// playing under it. The state machine cannot cover those; this can,
-		// because DoEffect runs regardless.
+		// SAFETY: the beam lives in a level-global slot, so anything that
+		// ends a trigger pull without running the Beam state's exit -- dying
+		// mid-burst, a forced swap, a telefrag -- would leave a live segment
+		// hanging in the world with a looping sound under it. The state
+		// machine cannot cover those; DoEffect runs regardless.
 		if (firing && owner)
 		{
-			bool stillUp = owner.health > 0
-				&& owner.player
+			bool stillUp = owner.health > 0 && owner.player
 				&& (owner.player.ReadyWeapon == self
 					|| owner.player.OffhandWeapon == self);
-			if (!stillUp)
-				Release(owner);
+			if (!stillUp) Release(owner);
 		}
 
-		if (!firing && heat > 0)
+		if (lockTics > 0)
 		{
-			heat -= locked ? LNC_VENTRATE : LNC_COOLRATE;
-			if (heat <= 0) { heat = 0; locked = false; }
+			lockTics--;
+			heat = LNC_HEAT_MAX;              // pinned, and the HUD should say so
+			if (lockTics <= 0) heat = 0.0;    // then all the way back
+			return;
+		}
+
+		if (!firing && heat > 0.0)
+		{
+			heat = max(0.0, heat - LNC_HEAT_FALL / 35.0);
 		}
 	}
 
@@ -654,7 +695,7 @@ class LNC_Lance : Weapon
 		Stop;
 
 	Ready:
-		PLSC A 1 A_WeaponReady(WRF_ALLOWRELOAD);
+		PLSC A 1 A_WeaponReady(WRF_NOSECONDARY);
 		Loop;
 
 	Deselect:
@@ -666,10 +707,10 @@ class LNC_Lance : Weapon
 		PLSC A 1 A_Raise;
 		Loop;
 
+	// No ammo check. Heat is the only gate.
 	Fire:
-		TNT1 A 0 A_JumpIf(invoker.locked, "Overheated");
-		TNT1 A 0 A_JumpIf(CountInv("Cell") > 0, "Beam");
-		Goto OutOfAmmo;
+		TNT1 A 0 A_JumpIf(invoker.lockTics > 0, "Overheated");
+		Goto Beam;
 
 	// ONE TIC PER LOOP. The beam is re-traced and re-drawn every tic, which
 	// is what makes it track as you turn rather than lagging behind the
@@ -680,29 +721,24 @@ class LNC_Lance : Weapon
 		TNT1 A 0 A_LanceStop();
 		Goto Ready;
 
-	// SHORTER THAN THE LOCKOUT, DELIBERATELY. This is 28 tics, but `locked`
-	// stays true for the whole vent (~93 tics from a full cook-off). Holding
-	// the trigger through a cook-off therefore cycles this animation rather
-	// than sitting in one long uninterruptible pose -- which means the gun
-	// comes back to Ready promptly enough to be DESELECTED. A 93-tic hard
-	// freeze would make an overheat a window where you cannot even switch to
-	// your other hand, and the punishment is meant to be "you have no beam",
-	// not "you have no inputs".
+	// SHORTER THAN THE LOCKOUT, DELIBERATELY -- 28 tics against 175. Holding
+	// the trigger through a cook-off cycles this rather than sitting in one
+	// long uninterruptible pose, so the gun returns to Ready often enough to
+	// be DESELECTED. The punishment is "you have no beam", not "you have no
+	// inputs" -- and swapping to your other hand while this one cools is the
+	// intended answer, not an exploit.
 	Overheated:
 		TNT1 A 0 A_LanceStop();
 		TNT1 A 0 A_StartSound("lnc/empty", CHAN_AUTO, 0, 0.6);
 		PLSC C 28;
 		Goto Ready;
-
-	OutOfAmmo:
-		TNT1 A 0 A_LanceStop();
-		TNT1 A 0 A_StartSound("lnc/empty", CHAN_AUTO);
-		Goto Ready;
 	}
 }
 
-// The offhand copy. Same weapon; the flag is what puts it in the other
-// hand, which in turn is what BeamSlot() reads to claim beam slot 1.
+// The offhand copy. Same weapon; the flag is what puts it in the other hand,
+// which in turn is what BeamSlot() reads to claim beam slot 1. Its heat is
+// its own -- alternating hands so one cools while the other burns is the
+// intended rhythm of dual-wielding these.
 class LNC_LanceOffhand : LNC_Lance
 {
 	Default
@@ -714,68 +750,30 @@ class LNC_LanceOffhand : LNC_Lance
 }
 
 // =====================================================================
-// RS_LancePuff -- the beam's impact, and it is deliberately almost
-// nothing.
+// LNC_Startup -- you spawn holding both of them.
 //
-// A beam lands up to seventeen times a second. An ordinary bullet puff at
-// that rate -- with its impact sound, debris, sparks and ricochets -- is
-// sixty-odd actors and seventeen sounds per second out of a weapon that is
-// meant to read as one silent continuous line of light.
-//
-// AND THE VISUAL IS THE ENGINE'S, NOT AN ACTOR'S. SetBeamLook's fifth
-// parameter is an impact flare that rides the segment's far end, drawn per
-// pixel by the same closest-approach solve that draws the beam. The hit is
-// therefore ALREADY lit, in the right place, at the right colour, for
-// free. A sprite puff on top of that is a second, worse drawing of
-// something the engine has already done -- so this contributes a single
-// 2-tic ember and gets out of the way.
-//
-// The sizzle is rolled at 1-in-6 rather than played every hit: at that
-// cadence an every-hit sound is not a sound, it is a tone, and it would
-// sit on top of the heat loop already running on CHAN_5.
+// Registered from MAPINFO's gameinfo block rather than by replacing the
+// player class, so this pk3 still steals nothing from whatever else is
+// loaded: no weapon slot taken, no existing actor overridden.
 // =====================================================================
-// COMPLETELY INVISIBLE, AND THAT IS THE POINT.
-//
-// The damage is delivered as 8-17 discrete LineAttacks a second, because a
-// hitscan is how the damage travels. But a beam must not LOOK like 17 shots
-// a second. Any visible sprite at that cadence -- however lean -- reads as a
-// rapid-fire weapon spitting impacts, which was exactly the report: "they
-// seem like they hit enemies and leave puffs like some kind of rapid fire
-// weapon." A per-hit decal does the same thing more permanently, stacking
-// seventeen scorches a second on whatever you hold the beam against.
-//
-// So this draws nothing and marks nothing. The impact is drawn by the ENGINE
-// instead -- SetBeamLook's flare term rides the segment's far end and is
-// continuous, which is what a beam burning into a surface actually looks
-// like. One steady bright spot that stays lit while you hold it, rather than
-// a stutter of individual hits.
-//
-// The puff actor still has to EXIST: LineAttack needs a puff class to carry
-// damage properly. It just has nothing to say.
-class LNC_LancePuff : Actor
+class LNC_Startup : EventHandler
 {
-	Default
+	override void PlayerEntered(PlayerEvent e)
 	{
-		+NOGRAVITY
-		+PUFFONACTORS
-		+ALWAYSPUFF
-		+NOBLOCKMAP
-		+NOINTERACTION
-		+DONTSPLASH
-		RenderStyle "None";
-	}
-	States
-	{
-	Spawn:
-		TNT1 A 1 NoDelay A_LanceImpact();
-		Stop;
-	}
+		let pmo = players[e.PlayerNumber].mo;
+		if (!pmo) return;
 
-	// The one thing it does. Rolled at 1-in-6 rather than played every hit:
-	// at this cadence an every-hit sound is not a sound, it is a tone.
-	action void A_LanceImpact()
-	{
-		if (Random(0, 5) == 0)
-			A_StartSound("lnc/sizzle", CHAN_AUTO, CHANF_DEFAULT, 0.3);
+		// Two separate classes: the offhand copy is what claims beam slot 1,
+		// so you need both to dual-wield. No ammo -- there is none.
+		pmo.A_GiveInventory("LNC_Lance", 1);
+		pmo.A_GiveInventory("LNC_LanceOffhand", 1);
+
+		// Seat them in both hands rather than leaving the offhand in the
+		// backpack waiting to be selected.
+		let p = players[e.PlayerNumber];
+		let main = Weapon(pmo.FindInventory("LNC_Lance"));
+		let off  = Weapon(pmo.FindInventory("LNC_LanceOffhand"));
+		if (main) p.PendingWeapon = main;
+		if (off)  p.OffhandWeapon = off;
 	}
 }

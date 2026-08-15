@@ -1,0 +1,14 @@
+// Hands the player the Lance on spawn, in both hands, with ammo.
+//
+// This pk3 replaces nothing -- no weapon slot stolen, no existing class
+// touched -- specifically so it can be loaded on top of another mod without
+// fighting it. The cost of that is you would otherwise have to `give` it from
+// the console every single time you load a map, which is intolerable when the
+// whole point of the load is to look at the beam.
+//
+// So it is granted instead of substituted: nothing else loses anything, and it
+// is simply there when you spawn.
+gameinfo
+{
+	AddEventHandlers = "LNC_Startup"
+}
