@@ -19,13 +19,14 @@
 // ---------------------------------------------------------------------
 // NO AMMO. HEAT IS THE ONLY RESOURCE.
 //
-// Heat runs 0 to 100. Holding the trigger drives it up at 25/second, so a
-// continuous hold reaches 100 in four seconds. Off the trigger it falls at
-// 12.5/second -- half speed, so short bursts are nearly free and long holds
-// commit. Touch 100 and the weapon locks out for a flat five seconds and
+// Heat runs 0 to 100. Holding drives it up at 10/second -- ten full seconds
+// before cook-off. Off the trigger there is a short grace, then it falls
+// fast -- about three seconds back to cold, so the climb must be held and
+// cannot be banked. Touch 100 and it locks out for a flat five seconds and
 // comes back stone cold.
 //
-// FIVE BANDS, each a flat damage rate:
+// SEVEN RUNGS, each a flat damage rate, and how many you climb through is
+// your TIER -- see LNC_Lance.Tier. A tier-1 gun sees only the first.
 //
 //     heat     DPS     what it is
 //     0-20      80     the sweeping band
@@ -192,7 +193,7 @@ class LNC_Lance : Weapon
 		Weapon.AmmoType1 "";
 
 		Inventory.PickupMessage "You got the Lance!";
-		Inventory.Icon "PLASA0";
+		Inventory.Icon "WPPIE0";   // WPPI E, the chunkiest of the five weapon icons -- closest to the Bolter silhouette. There is no dedicated Bolter pickup sprite in either art source; the world drop wears the MODEL instead (see MODELDEF).
 		+WEAPON.NOHANDSWITCH;
 		+WEAPON.AMMO_OPTIONAL;
 		+WEAPON.NOALERT;
@@ -943,17 +944,20 @@ class LNC_Startup : EventHandler
 		let pmo = players[e.PlayerNumber].mo;
 		if (!pmo) return;
 
-		// Two separate classes: the offhand copy is what claims beam slot 1,
-		// so you need both to dual-wield. No ammo -- there is none.
+		// ONE LANCE, MAINHAND, TIER 1.
+		//
+		// NOT both hands. The second gun is an unlock, earned from the first
+		// core you find -- see LNC_LanceCore. Handing out the pair at spawn
+		// would spend the run's biggest power spike before the player has
+		// fired a shot, and would leave nothing for the first drop to mean.
+		//
+		// No ammo either -- there is none.
 		pmo.A_GiveInventory("LNC_Lance", 1);
-		pmo.A_GiveInventory("LNC_LanceOffhand", 1);
+		if (pmo.CountInv("LNC_LanceTier") < 1)
+			pmo.A_GiveInventory("LNC_LanceTier", 1);
 
-		// Seat them in both hands rather than leaving the offhand in the
-		// backpack waiting to be selected.
 		let p = players[e.PlayerNumber];
 		let main = Weapon(pmo.FindInventory("LNC_Lance"));
-		let off  = Weapon(pmo.FindInventory("LNC_LanceOffhand"));
 		if (main) p.PendingWeapon = main;
-		if (off)  p.OffhandWeapon = off;
 	}
 }

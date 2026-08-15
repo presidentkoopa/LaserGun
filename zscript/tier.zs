@@ -82,38 +82,65 @@ class LNC_LanceCore : CustomInventory
 		Stop;
 	}
 
+	// THREE OUTCOMES, IN ORDER OF WHAT THE PLAYER HAS.
+	//
+	//   no Lance at all   -> you found the gun. Mainhand, tier 1.
+	//   one Lance         -> you found a SECOND one. It goes in your off
+	//                        hand, AND the pair steps up a tier.
+	//   two Lances        -> nothing left to hold it in, so it is stripped
+	//                        for parts: tier only.
+	//
+	// THE SECOND PICKUP IS THE DUAL-WIELD UNLOCK, and it is deliberately the
+	// same item rather than a separate one. Finding another Lance and ending
+	// up holding two Lances is the obvious reading; making dual-wield a
+	// distinct pickup would mean explaining why one laser gun grants a hand
+	// and another does not. It also makes the second core the single biggest
+	// upgrade in the run -- a whole extra beam AND a rung -- which is the
+	// right shape for a mid-run power spike.
 	action void A_LanceCorePickup()
 	{
 		if (!self) return;
 
-		// No Lance yet? This IS the Lance. First one found arms you at tier
-		// 1 rather than being a wasted pickup -- and it means the weapon can
-		// be found in the world instead of only being given at spawn.
-		bool hadGun = CountInv("LNC_Lance") > 0;
-		if (!hadGun)
-		{
-			A_GiveInventory("LNC_Lance", 1);
-			A_GiveInventory("LNC_LanceOffhand", 1);
-		}
+		bool hadMain = CountInv("LNC_Lance") > 0;
+		bool hadOff  = CountInv("LNC_LanceOffhand") > 0;
 
 		int before = CountInv("LNC_LanceTier");
+
+		if (!hadMain)
+		{
+			// Found the weapon itself. Tier 1, one hand.
+			A_GiveInventory("LNC_Lance", 1);
+			if (before < 1) A_GiveInventory("LNC_LanceTier", 1);
+			A_Print("LANCE ACQUIRED -- tier 1 of 7");
+			return;
+		}
+
+		// Everything past the first pickup buys a rung.
 		if (before < LNC_Lance.LNC_MAX_TIER)
 			A_GiveInventory("LNC_LanceTier", 1);
 		int after = CountInv("LNC_LanceTier");
 
-		// Seat the offhand as well, or the second gun sits in the backpack.
-		if (!hadGun && player)
+		if (!hadOff)
 		{
-			let off = Weapon(FindInventory("LNC_LanceOffhand"));
-			if (off) player.OffhandWeapon = off;
+			// THE SECOND GUN. Seated into the offhand here rather than left
+			// in the backpack -- an offhand weapon that has to be manually
+			// selected reads as not having been given at all.
+			A_GiveInventory("LNC_LanceOffhand", 1);
+			if (player)
+			{
+				let off = Weapon(FindInventory("LNC_LanceOffhand"));
+				if (off) player.OffhandWeapon = off;
+			}
+			A_Print(String.Format(
+				"SECOND LANCE -- dual wield, tier %d of %d",
+				after, LNC_Lance.LNC_MAX_TIER));
+			return;
 		}
 
-		// TELL THE PLAYER WHAT CHANGED, and in the terms that matter -- the
-		// tier number, not "you got a thing". A silent upgrade to an
-		// invisible counter is indistinguishable from a bug.
-		if (!hadGun)
-			A_Print("LANCE ACQUIRED -- tier 1 of 7");
-		else if (after > before)
+		// TELL THE PLAYER WHAT CHANGED, in the terms that matter -- the tier
+		// number, not "you got a thing". A silent bump to an invisible
+		// counter is indistinguishable from a bug.
+		if (after > before)
 			A_Print(String.Format("LANCE UPGRADED -- tier %d of %d",
 				after, LNC_Lance.LNC_MAX_TIER));
 		else
