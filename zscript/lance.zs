@@ -193,7 +193,7 @@ class LNC_Lance : Weapon
 		Weapon.AmmoType1 "";
 
 		Inventory.PickupMessage "You got the Lance!";
-		Inventory.Icon "WPPIE0";   // WPPI E, the chunkiest of the five weapon icons -- closest to the Bolter silhouette. There is no dedicated Bolter pickup sprite in either art source; the world drop wears the MODEL instead (see MODELDEF).
+		Inventory.Icon "PLASA0";   // Vanilla, matching MeatGrinder -- its PlasmaThrower spawns as PLAS A (weapons.txt:563), so the Bolter never had a custom pickup sprite by design. The WORLD drop still wears the Bolter model bound to that same PLAS A frame (MODELDEF), so what lies on the floor is the gun itself.
 		+WEAPON.NOHANDSWITCH;
 		+WEAPON.AMMO_OPTIONAL;
 		+WEAPON.NOALERT;
