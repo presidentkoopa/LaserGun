@@ -930,34 +930,47 @@ class LNC_LanceOffhand : LNC_Lance
 	}
 }
 
+
 // =====================================================================
-// LNC_Startup -- you spawn holding both of them.
+// LNC_LaserMarine -- the class that starts with one.
 //
-// Registered from MAPINFO's gameinfo block rather than by replacing the
-// player class, so this pk3 still steals nothing from whatever else is
-// loaded: no weapon slot taken, no existing actor overridden.
+// ONE LANCE, MAINHAND. Not two. The second gun is an unlock earned from
+// the first core you find (see LNC_LanceCore) -- handing out the pair at
+// spawn would spend the run's biggest power spike before the player has
+// fired a shot, and would leave the first drop with nothing to mean.
+//
+// A PLAYER CLASS RATHER THAN AN UNCONDITIONAL GRANT. This used to be an
+// event handler that gave every player a Lance on spawn regardless of who
+// they were, which was fine while this pk3 was a test bed and wrong the
+// moment it became something you load alongside a real mod: it armed every
+// class in the game with a weapon they did not choose.
+//
+// Now it is a choice. Pick Laser Marine and you start with it; pick
+// anything else and you can still FIND one, because LNC_LanceCore already
+// arms a player who has no Lance at all. Same item, two ways in.
+//
+// GiveDefaultInventory RATHER THAN Player.StartItem, because the Lance has
+// no ammo type at all -- and GiveDefaultInventory only auto-selects weapons
+// that have ammo, so a StartItem Lance would be granted and then left
+// unequipped behind the pistol. Seating PendingWeapon by hand is the only
+// reliable way to actually be holding it.
 // =====================================================================
-class LNC_Startup : EventHandler
+class LNC_LaserMarine : DoomPlayer
 {
-	override void PlayerEntered(PlayerEvent e)
+	Default
 	{
-		let pmo = players[e.PlayerNumber].mo;
-		if (!pmo) return;
+		Player.DisplayName "Laser Marine";
+	}
 
-		// ONE LANCE, MAINHAND, TIER 1.
-		//
-		// NOT both hands. The second gun is an unlock, earned from the first
-		// core you find -- see LNC_LanceCore. Handing out the pair at spawn
-		// would spend the run's biggest power spike before the player has
-		// fired a shot, and would leave nothing for the first drop to mean.
-		//
-		// No ammo either -- there is none.
-		pmo.A_GiveInventory("LNC_Lance", 1);
-		if (pmo.CountInv("LNC_LanceTier") < 1)
-			pmo.A_GiveInventory("LNC_LanceTier", 1);
+	override void GiveDefaultInventory()
+	{
+		Super.GiveDefaultInventory();
 
-		let p = players[e.PlayerNumber];
-		let main = Weapon(pmo.FindInventory("LNC_Lance"));
-		if (main) p.PendingWeapon = main;
+		A_GiveInventory("LNC_Lance", 1);
+		if (CountInv("LNC_LanceTier") < 1)
+			A_GiveInventory("LNC_LanceTier", 1);
+
+		let w = Weapon(FindInventory("LNC_Lance"));
+		if (w && player) player.PendingWeapon = w;
 	}
 }

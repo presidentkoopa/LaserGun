@@ -1,14 +1,16 @@
-// Hands the player the Lance on spawn, in both hands, with ammo.
+// ADDPlayerClasses / ADDEventHandlers, both additive on purpose.
 //
-// This pk3 replaces nothing -- no weapon slot stolen, no existing class
-// touched -- specifically so it can be loaded on top of another mod without
-// fighting it. The cost of that is you would otherwise have to `give` it from
-// the console every single time you load a map, which is intolerable when the
-// whole point of the load is to look at the beam.
-//
-// So it is granted instead of substituted: nothing else loses anything, and it
-// is simply there when you spawn.
+// The non-Add forms REPLACE the lists outright. `PlayerClasses` here would
+// wipe every class of whatever mod this is loaded alongside -- RS_Main ships
+// nine of them -- and `EventHandlers` would unregister that mod's handlers.
+// A drop-in weapon must add to a game, never redefine it.
 gameinfo
 {
-	AddEventHandlers = "LNC_Startup"
+	AddPlayerClasses = "LNC_LaserMarine"
+
+	// ALL THREE. Only LNC_Startup was ever listed here, which meant
+	// LNC_BurnHandler and LNC_DropHandler existed, compiled, and never ran:
+	// GZDoom does not auto-register EventHandler subclasses. Burning deaths
+	// and the 2% core drop were both dead from the day they were written.
+	AddEventHandlers = "LNC_BurnHandler", "LNC_DropHandler"
 }
