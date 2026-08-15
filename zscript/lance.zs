@@ -218,7 +218,13 @@ class LNC_Lance : Weapon
 		// Any independently-derived direction is a second opinion that can
 		// disagree with the trace. Reading HitDir makes the drawn beam and
 		// the damage physically incapable of pointing different ways.
+		// NORMALIZED DEFENSIVELY. It is only used to build the miss endpoint
+		// below, where a non-unit vector would multiply LNC_RANGE into a
+		// wildly overshot segment -- and "is this actually unit length" is
+		// exactly the assumption that cost two rounds of debugging.
 		Vector3 dir = d.HitDir;
+		double dirLen = dir.Length();
+		dir = (dirLen > 0.001) ? dir / dirLen : (0, 0, 0);
 
 		// ON A MISS, d.HitLocation IS THE MAP ORIGIN (0,0,0), NOT "NO
 		// ANSWER". P_LineTrace zeroes its result struct before tracing and
@@ -262,42 +268,34 @@ class LNC_Lance : Weapon
 		// units -- most of a player's height. Starting that at arm's length
 		// from the eye engulfs the camera and washes the screen white.
 		//
-		// LaserBeamOffset is the engine's own answer: hw_weapon.cpp reads it
-		// to place the VR laser SIGHT at a weapon's muzzle. Using the same
-		// property with the same basis math means the beam and the sight
-		// emit from one point by construction.
+		// SLIDE ALONG THE SEGMENT WE ALREADY HAVE. `from` and `to` are both
+		// authoritative -- one is the trace's origin, the other its result --
+		// so a point between them is on the beam line BY CONSTRUCTION. No
+		// direction, no basis vectors, no cvars: nothing that can disagree.
 		//
-		// THE COMPONENT ORDER IS DELIBERATELY ODD AND IS COPIED, NOT CHOSEN.
-		// hw_weapon.cpp builds its offset as
-		//     totalOffset = (laser_y + weap.Y, laser_x + weap.X, laser_z + weap.Z)
-		// and applies .X along FORWARD, .Y along SIDE, .Z along UP. So in an
-		// authored LaserBeamOffset it is Y that means "forward" and X that
-		// means "sideways". Mirrored exactly here; do not tidy it without
-		// changing the engine to match, or sight and beam will split.
+		// LaserBeamOffset.Y IS THE DISTANCE, and Y is not a typo. The engine
+		// reads this same property to place its VR laser sight, and
+		// hw_weapon.cpp applies the .Y component along FORWARD (it builds
+		// totalOffset as (laser_y + weap.Y, ...) and applies .X of that along
+		// the forward axis). Keeping the weapon's number in the same field
+		// the engine reads means the beam and the sight stay together.
+		//
+		// AN EARLIER VERSION mirrored the engine's full forward/side/up basis
+		// so a sideways offset would work too. It broke: the shot went where
+		// the gun pointed and hit correctly, and the DRAWN beam started at
+		// that hit point and ran off sideways -- a lateral displacement,
+		// which is exactly what the `side` term contributes and nothing else
+		// does. Three extra inputs to support an offset that is zero
+		// sideways and zero up. This version cannot displace laterally at
+		// all, and the clamp keeps it from ever passing the endpoint.
 		//
 		// The trace is untouched. Only where the beam is DRAWN from moves.
 		// ====================================================================
-		Vector3 off = w.LaserBeamOffset;
-		double fwdAmt  = off.Y + LNC_Lance.LaserCVar("vr_laser_source_offset_y");
-		double sideAmt = off.X + LNC_Lance.LaserCVar("vr_laser_source_offset_x");
-		double upAmt   = off.Z + LNC_Lance.LaserCVar("vr_laser_source_offset_z");
-
-		// Same degenerate-case guards the engine uses: a beam pointing
-		// straight up or down makes the first cross product vanish.
-		Vector3 side = ((0, 0, 1) cross dir);
-		if (side dot side < 1e-8) side = (0, 1, 0);
-		side /= side.Length();
-		Vector3 up = (dir cross side);
-		if (up dot up < 1e-8) up = (0, 0, 1);
-		up /= up.Length();
-
-		// POINT-BLANK GUARD. Held against a wall, the hit can be nearer than
-		// the muzzle offset, which would push the start PAST the end and
-		// draw a backwards segment through the player. Clamp the forward
-		// push to half the actual distance so the beam just gets short.
 		double hitDist = (to - from).Length();
-		double useFwd = min(fwdAmt, hitDist * 0.5);
-		Vector3 drawFrom = from + dir * useFwd + side * sideAmt + up * upAmt;
+		double frac = (hitDist > 0.001)
+			? clamp(w.LaserBeamOffset.Y / hitDist, 0.0, 0.5)
+			: 0.0;
+		Vector3 drawFrom = from + (to - from) * frac;
 
 		// ---- shape, and it is all one number --------------------------------
 		double charge = w.Charge();
@@ -468,16 +466,6 @@ class LNC_Lance : Weapon
 			heat -= locked ? LNC_VENTRATE : LNC_COOLRATE;
 			if (heat <= 0) { heat = 0; locked = false; }
 		}
-	}
-
-	// The three global laser-source nudges hw_weapon.cpp adds on top of the
-	// per-weapon offset. Read rather than assumed zero so that if the player
-	// tunes the laser SIGHT in the VR options, the beam follows it instead
-	// of quietly drifting away from it. Missing cvar reads as 0.
-	static double LaserCVar(string name)
-	{
-		CVar c = CVar.FindCVar(name);
-		return c ? c.GetFloat() : 0.0;
 	}
 
 	static Color LerpCol(int a, int b, double t)
