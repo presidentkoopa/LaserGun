@@ -16,14 +16,14 @@ And it doesn't fire. There are no shots. It's **on**, and while it's on it burns
 *Shot on desktop, where the gun is a screen overlay with no world position, so
 the muzzle has to be guessed at. In VR it comes out of the barrel — the tracked
 controller is a real point in the world, nothing to guess.*
-THIS NEEDS A REAL SOUND, PLACEHOLDER SOUND IS OKAY FOR NOW
-STILL NEEDS A SECONDARY AND TERITARY ATTACK
+
 ---
 
 ## Coming
 
-- **A proper beam sound.** It currently borrows a looping plasma tone. A held
-  beam wants one continuous voice that rises with the heat, not a loop.
+- **A real beam sound.** What's in there now is a placeholder — a loop cut from
+  a Klingon disruptor. It works, but a held beam wants a voice of its own.
+- **Secondary and tertiary attacks.** It has one trigger and that's it.
 - **The VR mega-beam.** Bring both hands together and the two Lances merge into
   one unified beam fired from the point between them. Only possible in VR,
   because it needs two real tracked positions — and it's a physical input, no

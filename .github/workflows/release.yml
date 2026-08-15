@@ -1,0 +1,52 @@
+# Builds RS_Lance.pk3 and attaches it to a GitHub release, on tag.
+#
+# A pk3 IS a zip -- GZDoom reads them by structure, not extension -- so the
+# whole build is "zip the tree and rename it". No toolchain, no compile step.
+#
+# WHAT IS EXCLUDED AND WHY:
+#   docs/       ~8MB of README screenshots. Dead weight inside a game archive
+#               that the engine will never open.
+#   .git*       repository plumbing.
+#   .github/    this file.
+#   README.md   kept OUT of the pk3 but present on the release page anyway.
+#
+# Everything else ships: zscript, MODELDEF, SNDINFO, MAPINFO, BONSAIRC, and
+# the models/sprites/sounds the weapon needs to run standalone.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pk3:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build RS_Lance.pk3
+        run: |
+          zip -r -9 RS_Lance.pk3 . \
+            -x '.git/*' '.github/*' 'docs/*' '.gitattributes' '.gitignore' 'README.md'
+          unzip -l RS_Lance.pk3 | tail -3
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: RS_Lance.pk3
+          generate_release_notes: true
+          body: |
+            **Requires the UZDXREMA engine fork. Will not compile on stock GZDoom.**
+            Desktop / PCVR only — the beam renderer is not implemented on GLES,
+            so Quest and mobile GL paths cannot run this.
+
+            ```
+            doomxr.exe -iwad doom2.wad -file RS_Lance.pk3
+            ```
+
+            Pick the **Laser Marine** class to start with one, or find one — 2% of
+            dead humanoids drop a core. The first core you find is your second gun.
