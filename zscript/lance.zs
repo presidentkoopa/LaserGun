@@ -395,13 +395,24 @@ class LNC_Lance : Weapon
 		level.SetBeamLook(
 			0.45 + 0.55 * charge,         // air glow
 			5.0 + 11.0 * charge,          // scroll speed
-			// SCROLL DEPTH -- KEEP THIS SMALL. main.fp modulates brightness
-			// by sin(along * 0.06 - timer*speed) and multiplies by 1 + depth*s.
-			// The wavelength is 2*pi/0.06 ~= 105 world units, so across an
-			// ordinary room this is roughly ten bright/dark bands. Too much
-			// depth and the beam reads as a string of beads rather than a
-			// continuous line.
-			0.05 + 0.10 * charge,         // scroll depth
+			// SCROLL DEPTH: ZERO, AND IT STAYS ZERO.
+			//
+			// This is the beading. main.fp does
+			//     bright *= 1.0 + uBeamFX.y * sin(along * 0.06 - timer*speed)
+			// and that sine is the ONLY periodic term in the entire beam
+			// shader -- BeamLightAt, the surface half, is pure distance
+			// falloff with nothing repeating in it. Wavelength is
+			// 2*pi/0.06 ~= 105 world units, so across an ordinary room it is
+			// about ten bright/dark bands: (gun) -0-0-0-0-0-.
+			//
+			// Any nonzero value puts them back. Reducing it only made them
+			// fainter, which is not the same as a beam. A capital-ship lance
+			// is one solid unbroken bar of light, and the shader draws exactly
+			// that the moment this term is switched off.
+			//
+			// The engine skips the whole block on zero (`if (uBeamFX.y > 0)`),
+			// so this is genuinely off, not merely small.
+			0.0,                          // scroll depth -- see above
 			0.45 - 0.30 * charge,         // taper, slackening
 			1.2 + 1.40 * charge);         // impact flare
 
@@ -444,7 +455,13 @@ class LNC_Lance : Weapon
 					vlen,                     // length: exactly the segment
 					0.30 + 0.45 * charge,     // density
 					1.6,                      // falloff, concentrated near the lens
-					0.45 + 0.55 * charge,     // dust amount
+					// DUST OFF FOR NOW. Motes are, definitionally, points of
+					// light -- and points of light along the beam are the
+					// exact thing being hunted out of this weapon. Bring it
+					// back only once the bar itself reads as solid, and then
+					// as atmosphere in the ROOM rather than texture on the
+					// beam.
+					0.0,                      // dust amount
 					0.045,                    // dust mote scale
 					2.0 + 7.0 * charge);      // dust drift, faster as it heats
 			}
