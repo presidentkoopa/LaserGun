@@ -11,6 +11,10 @@ And it doesn't fire. There are no shots. It's **on**, and while it's on it burns
 | ![](docs/beam-cyan.png) | ![](docs/beam-green.png) |
 | ![](docs/beam-gold.png) | ![](docs/beam-magenta.png) |
 
+*Shot on desktop, where the gun is a screen overlay with no world position, so
+the muzzle has to be guessed at. In VR it comes out of the barrel — the tracked
+controller is a real point in the world, nothing to guess.*
+
 ---
 
 ## It gets stronger when you find more of it
