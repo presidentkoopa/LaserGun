@@ -1,0 +1,16 @@
+# ZScript and lump text stay LF in the repo; git can do what it likes locally.
+# Without this every commit warns about CRLF conversion on every file.
+*.zs   text eol=lf
+*.zsc  text eol=lf
+*.txt  text eol=lf
+*.md   text eol=lf
+MODELDEF  text eol=lf
+SNDINFO   text eol=lf
+MAPINFO   text eol=lf
+BONSAIRC  text eol=lf
+
+# Assets are binary. Never let git touch these.
+*.png  binary
+*.ogg  binary
+*.md3  binary
+*.lmp  binary

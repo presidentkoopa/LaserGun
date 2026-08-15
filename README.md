@@ -3,27 +3,39 @@
 A real beam weapon for the **UZDXREMA** engine fork.
 
 Not a sprite. Not a chain of puffs. Not a stretched quad. The beam is a
-*segment light* — the engine lights every pixel by its distance from the
-line, so it is continuous at any length, wraps floor/wall/ceiling as one
-unbroken object, hangs visibly in the air, correctly disappears behind
-walls, feeds bloom on its own, and lights the surfaces near it because they
-**are** near it. Nothing is spawned to fake any of that.
+*segment light* — the engine lights every pixel by its distance from the line,
+so it is continuous at any length, wraps floor/wall/ceiling as one unbroken
+object, hangs visibly in the air, correctly disappears behind walls, feeds
+bloom on its own, and lights the surfaces near it because they **are** near it.
+Nothing is spawned to fake any of that.
+
+And it does not fire. There are no shots. The beam is **on**, and while it is on
+it deposits energy at a rate.
+
+| | |
+|---|---|
+| ![](docs/beam-cyan.png) | ![](docs/beam-green.png) |
+| ![](docs/beam-gold.png) | ![](docs/beam-amber.png) |
+| ![](docs/beam-magenta.png) | ![](docs/beam-violet.png) |
 
 ---
 
-## Requires the fork
+## ⚠ Requires the fork. It will not run on stock GZDoom.
 
-This will **not** run on stock GZDoom. It does not compile there.
-
-It needs two things stock GZDoom does not have:
+It does not merely fail at runtime — **it does not compile.**
 
 | Needs | For |
 |---|---|
 | `Level.SetBeam` / `SetBeamCount` / `SetBeamLook` | drawing the beam at all |
+| `Level.SetVolumetricBeam` | the lit air around it |
 | `AttackPos` / `OffhandPos` / `OverrideAttackPosDir` / `Weapon.LaserBeamOffset` | tracked-hand aim and the muzzle origin |
 
-The first group is UZDXREMA's own (see `FORK_CHANGES.md` §13). The second
-comes from its VR lineage.
+The first two groups are UZDXREMA's own (`FORK_CHANGES.md` §13 and §4). The
+third comes from its VR lineage.
+
+**Desktop / PCVR only.** The beam renderer is not implemented on GLES, so this
+cannot work on Quest or any mobile GL path — it would load, compile, and draw
+nothing. A laser gun with no laser.
 
 ## Load it
 
@@ -34,58 +46,79 @@ doomxr.exe -iwad doom2.wad -file RS_Lance
 Loads as a loose directory or zipped as a `.pk3`. It replaces nothing and
 touches no existing class, so it drops into other mods without conflict.
 
-To get it in-game:
-
-```bash
-give LNC_Lance
-```
-
-`LNC_LanceOffhand` is the same weapon flagged for the other hand — give
-both and you dual-wield, each holding its own beam.
+You spawn holding one, mainhand. To get the rest, find more.
 
 ---
 
 ## How it plays
 
-Everything the weapon does — damage, rate of fire, colour, width,
-brightness, sound pitch, even how long the next trigger pull takes to spin
-up — comes from one number: **charge**, which is heat over the cook-off
-threshold, 0 to 1.
+### No ammo. Heat is the only resource.
 
-| | cold | mid | edge |
-|---|---|---|---|
-| damage × | 0.40 | 1.32 | **3.00** |
-| cadence | every 4 tics | 3 | **2** |
-| ≈ DPS | 14 | 62 | **210** |
+Heat runs 0 to 100. Holding drives it up at 10/second — **ten full seconds** of
+continuous fire before cook-off. Release and there is a short grace where
+nothing bleeds, then it falls fast: about three seconds back to cold. Touch 100
+and the weapon locks out for a flat five seconds and comes back **stone cold**,
+so an overheat costs the whole climb, not just the wait.
 
-**Holding ramps you up.** The curve is back-loaded (`c^1.5`) so the top is
-somewhere you have to commit to reach. A linear ramp would hand out most of
-the payoff in the first second and make tapping optimal, which would defeat
-the point of a sustained weapon.
+Each hand has its own heat. They never heat each other.
 
-**Releasing keeps it.** Heat bleeds at half the rate it builds, so a short
-pulse costs almost none of the ramp. Pulse the trigger to sit just under
-cook-off and hold peak damage indefinitely — at the price of never being
-able to relax.
+### Seven rungs, and a ladder you climb by finding more of the gun
 
-**Re-pulling costs.** Every pull pays a spin-up before it damages anything.
-But the spin-up *shortens* with charge — 14 tics cold, 3 hot — because a
-hot emitter relights fast. That is what makes pulsing rewarding rather than
-merely tedious.
+| tier | DPS at the top | what a ten-second hold does |
+|---|---|---|
+| 1 | 60 | one flat band. Blue. No gear changes. |
+| 2 | 95 | gears once, halfway up |
+| 4 | 235 | three gear changes |
+| 7 | **900** | six gear changes, blue → magenta |
 
-**Cooking off hurts.** Past 1.0 the beam cuts and the weapon vents, locked,
-all the way back to stone cold — about 2.8 seconds of holding a dead gun.
-After four seconds of white glare you are standing in a black room, which
-is a worse punishment than any number going down.
+**The tier subdivides the heat bar; it does not cap it.** Every trigger pull
+still starts cold, blue, at 60 DPS. What the tier buys is how many rungs that
+same climb passes through. So an upgrade changes the *shape* of a burst rather
+than its starting point — which is what makes it feel like a different weapon
+instead of a bigger number.
 
-The colour ramp is the gauge: cold blue-white → hard white → amber → a bad
-orange. There is deliberately no meter. White owns the broad middle where
-the weapon is comfortable; the last third is where it visibly stops being.
+### Why it cuts fodder like a shotgun but makes bosses a siege
 
-**The real cost** is that firing is a tactical disclosure. In a dark map you
-can see twenty metres. The moment you pull the trigger there is a line of
-white light hanging in the air lighting the corridor, and you standing in
-it. The damage is balanced knowing that.
+One curve read from both ends, not two systems:
+
+- A zombieman is 20hp and dies in a third of a second in band 1. You never leave
+  the bottom band, so **clearing a room costs almost no heat** — the gun is
+  still cold when the room is empty.
+- A Baron is 1000hp. Band 1 would need sixteen seconds and you cook off at ten,
+  so **band 1 physically cannot kill a boss.** You have to climb, climbing means
+  holding, and holding is the thing that overheats you.
+
+### Reading the beam
+
+The colour is the gauge, and it tells you two things at once: within a burst,
+how hot you are — across a run, how far up the ladder your gun has come. A
+tier-1 player only ever sees deep blue. Seeing magenta at all means somebody is
+carrying a fully built Lance.
+
+Band changes flash white and fat for five tics, so the gear change reads in
+peripheral vision while you are looking at what you are killing.
+
+### Three layers
+
+A wide soft **sheath** on the axis; a dense bright **core** whose muzzle end
+orbits slowly; a thinner **filament** counter-rotating at a wider radius. Only
+the start points move — both far ends stay pinned to the impact, so the moving
+layers converge on the target rather than sliding off it. Stirred at the barrel,
+dead accurate at the other end.
+
+### Burning deaths
+
+Anything the Lance kills catches fire. Five flame sets rolled per flame, half
+mirrored, scattered through the victim's own volume and scaled to its size, so a
+Cyberdemon burns like a Cyberdemon. Six screams across two `$random` groups with
+pitch jitter — a room of burning zombies is a chorus, not one sound six times.
+Leaves ash.
+
+### Drops
+
+2% of dead humanoids drop a Lance core. The **first** one you find is the second
+gun — offhand, dual wield — *and* a rung. Every one after that is a rung, to a
+maximum of seven.
 
 ---
 
@@ -93,57 +126,47 @@ it. The damage is balanced knowing that.
 
 | Where | What |
 |---|---|
-| `Weapon.LaserBeamOffset (0, 22, 0)` | how far down the barrel the beam starts. **`Y` is forward, not `X`** — see below. |
-| `LNC_DAMAGE` | base damage before the charge ramp |
-| `LNC_OVERHEAT` / `LNC_HEATRATE` | how long a full hold lasts (280 ÷ 2 = 140 tics = 4.0s) |
-| `LNC_COOLRATE` / `LNC_VENTRATE` | how fast heat bleeds normally / after a cook-off |
-| `LNC_SPINUP` | the cold spin-up, scaled down by charge in `SpinupNeeded()` |
-| `thick` / `soft` / `inten` in `A_LanceBeam` | how fat and how bright |
+| `LNC_HEAT_RISE` | seconds to cook off (10.0/sec = 10s) |
+| `LNC_HEAT_FALL` / `LNC_HEAT_GRACE` | how fast the ladder decays when you stop |
+| `LNC_LOCKOUT` | cook-off penalty, in tics |
+| `LNC_MAX_TIER` + `Band()` + `DPS()` + `CoreColor()` | the ladder itself |
+| `LNC_MUZZLE_FWD/RIGHT/UP` | where the beam leaves the gun **on desktop** |
+| `Weapon.LaserBeamOffset` | same, **in VR** (Y is forward, not X) |
+| `LNC_DROP_PERMILLE` | drop chance, in tenths of a percent |
 
-### Two things that will bite you
+### Three things that will bite you
 
 **`LaserBeamOffset` is not XYZ.** The engine builds its offset as
-`(laser_y + weap.Y, laser_x + weap.X, laser_z + weap.Z)` and then applies
-`.X` along *forward*, `.Y` along *side*, `.Z` along *up*. So in an authored
-offset it is **Y that means forward** and X that means sideways. The code
-mirrors this exactly so that the beam and the engine's own VR laser sight
-emit from one point. Do not tidy it without changing the engine to match.
+`(laser_y + weap.Y, laser_x + weap.X, laser_z + weap.Z)` and applies `.X` along
+*forward*, `.Y` along *side*. So **Y means forward**. The code mirrors this so
+the beam and the engine's own VR laser sight emit from one point.
 
-**`SetBeamLook` and the glow term of `SetBeamCount` are frame-global.**
-They are single vec4s in the viewpoint block, not arrays. Every beam on
-screen shares them and the last caller each tic wins. Per beam you only get
-start, end, thickness, softness, colour and intensity. If you add a second
-beam user, those globals want one owner rather than every actor stomping the
-others.
+**`SetBeamLook` and the glow term of `SetBeamCount` are frame-global.** Single
+vec4s in the viewpoint block, not arrays. Every beam on screen shares them, last
+caller each tic wins. Per beam you only get start, end, thickness, softness,
+colour and intensity.
 
-There are **8 beam slots** total. This weapon uses slot 0 for the mainhand
-and slot 1 for the offhand, so two Lances never fight over one. Each active
-slot costs a per-pixel segment test across the whole screen, twice — once
-for surface lighting, once for the glow in the air — so the count is a real
-budget, not a free ceiling.
+**Scroll depth must stay at zero.** `main.fp` modulates brightness by
+`sin(along * 0.06 - timer*speed)`, and that sine is the only periodic term in
+the entire beam shader. Wavelength is ~105 world units, so any nonzero value
+stamps a bright/dark band every 105 units and a beam across a room reads as a
+string of beads rather than a solid bar.
+
+There are **8 beam slots** total; this weapon uses six, three per hand.
+Each active slot costs a per-pixel segment test across the whole screen, twice —
+once for surface lighting, once for the glow in the air.
 
 ---
 
-## Differences from the RS_Main version
-
-Extracted from RS_Main's `RS_LaserGun`. The beam, the heat model, the
-damage ramp and the muzzle origin are identical. What was removed is
-RS_Main, not the weapon:
-
-- Damage goes through a direct `LineAttack` instead of RS_Main's attack-slot
-  assembly — so no affix axes, no shot keywords, no GunBonsai tracking, no
-  crit or condition system.
-- Base damage is a constant rather than rolled from a tier table, so the
-  weapon has no hidden per-instance state.
-- Two classes instead of six. RS_Main carries six tier variants; here there
-  is just a mainhand and an offhand.
-- No HUD heat readout. RS_Main puts it in the status bar's magazine row,
-  which a drop-in weapon has no business hijacking. The colour ramp is the
-  gauge.
-- The impact puff is self-contained rather than deriving from RS_Main's
-  material-resolving puff base.
-
 ## Credits
 
-Bolter model and skin, plasma foley, and the beam renderer are all from the
-RS_Main / UZDXREMA project.
+This is a mod, and it stands on other people's work.
+
+- **Bolter model and skin**, plasma foley, and the weapon sprite frames are from
+  **MeatGrinder** (`meatgrinderV2C`).
+- **Flame, ash and burn-scream assets** come from the RS_Main art library and
+  carry the mixed provenance of that collection.
+- The **beam, volumetric and VR systems** are UZDXREMA's.
+
+Extracted from RS_Main's `RS_LaserGun`. If you own any of the above and want it
+removed, say so and it goes.
