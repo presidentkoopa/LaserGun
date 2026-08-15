@@ -16,7 +16,8 @@ And it doesn't fire. There are no shots. It's **on**, and while it's on it burns
 *Shot on desktop, where the gun is a screen overlay with no world position, so
 the muzzle has to be guessed at. In VR it comes out of the barrel — the tracked
 controller is a real point in the world, nothing to guess.*
-
+THIS NEEDS A REAL SOUND, PLACEHOLDER SOUND IS OKAY FOR NOW
+STILL NEEDS A SECONDARY AND TERITARY ATTACK
 ---
 
 ## Coming
