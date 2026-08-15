@@ -133,6 +133,10 @@ class LNC_Lance : Weapon
 	int lastBand;
 	int flashTics;
 
+	// Tics of off-trigger grace left before heat starts bleeding. Refilled
+	// every tic the beam is live -- see DoEffect.
+	int graceLeft;
+
 	// ---- the heat model, all of it -------------------------------------
 	// SLOWED 2026-08-14 on the owner's call: "have it last longer, make it
 	// take longer to get to the higher levels of damage without dying on
@@ -141,8 +145,26 @@ class LNC_Lance : Weapon
 	// something you commit to across a fight rather than a sprint.
 	const LNC_HEAT_MAX  = 100.0;
 	const LNC_HEAT_RISE = 10.0;    // per second firing -> 10.0s cold to max
-	const LNC_HEAT_FALL = 8.0;     // per second idle   -> 12.5s max to cold
-	const LNC_LOCKOUT   = 175;     // tics -- a flat 5.0 seconds
+
+	// COOLING, AND IT IS FAST ON PURPOSE.
+	//
+	// The owner's ask: "when I stop firing the laser, it needs a few tics to
+	// cool down back to the original damage output and colour."
+	//
+	// Two parts, because a single rate cannot do both jobs. A short GRACE
+	// where nothing bleeds at all, so that squeezing off two quick bursts at
+	// the same target does not cost you the rung you just climbed -- then a
+	// FAST fall, so that genuinely stopping drops you back to blue in about
+	// three seconds rather than the twelve the old bleed took.
+	//
+	// The grace is what keeps the weapon usable; the fast fall is what makes
+	// the climb something you have to hold rather than something you bank.
+	const LNC_HEAT_GRACE = 8;      // tics off-trigger before cooling starts
+	const LNC_HEAT_FALL  = 32.0;   // per second idle -> ~3.1s max to cold
+	const LNC_LOCKOUT    = 175;    // tics -- a flat 5.0 seconds
+
+	// Seven rungs. The ladder's height is a per-player upgrade; see Tier().
+	const LNC_MAX_TIER  = 7;
 
 	const LNC_RANGE     = 2200.0;
 
@@ -197,13 +219,40 @@ class LNC_Lance : Weapon
 	// Which of the five bands, 0-4. Exposed because the visuals step with
 	// it as well -- the beam should look like it changed gear, not merely
 	// like it got slightly brighter.
+	// ---- TIER: how far up the ladder this gun can climb ------------------
+	//
+	// One counter, held by the PLAYER rather than by either weapon, so both
+	// hands are always the same tier. Two Lances at different power would be
+	// unreadable -- you would have to remember which hand was which.
+	//
+	// Starts at 1: one colour, one damage rate, a flat beam. Every Lance
+	// picked up afterwards adds a rung, to a maximum of LNC_MAX_TIER.
+	clearscope int Tier() const
+	{
+		if (!owner) return 1;
+		return clamp(owner.CountInv("LNC_LanceTier"), 1, LNC_MAX_TIER);
+	}
+
+	// THE HEAT BAR IS SUBDIVIDED BY TIER, NOT CAPPED BY IT.
+	//
+	// This is the part that makes the upgrade feel like a change of weapon
+	// rather than a bigger number. Heat always runs the same 0-100 and
+	// always starts at the bottom -- what the tier changes is how many rungs
+	// that climb passes through.
+	//
+	//     tier 1   one band       the whole bar is a single flat beam
+	//     tier 2   two bands      halfway up, it gears once
+	//     tier 7   seven bands    six gear changes across the same ten seconds
+	//
+	// Capping instead -- fixed 1/7th-wide bands with the top ones simply
+	// unreachable -- would mean a tier-2 gun spent 70% of its heat bar doing
+	// nothing, and the bar would read as mostly wasted. This way every rung
+	// of heat you build always buys something, at every tier.
 	clearscope int Band() const
 	{
-		if (heat < 20.0) return 0;
-		if (heat < 40.0) return 1;
-		if (heat < 60.0) return 2;
-		if (heat < 80.0) return 3;
-		return 4;
+		int t = Tier();
+		int b = int(Charge() * t);
+		return clamp(b, 0, t - 1);
 	}
 
 	// FLAT WITHIN EACH BAND, as specified. Not a smooth curve: the steps are
@@ -215,17 +264,22 @@ class LNC_Lance : Weapon
 	// bosses without needing a second system to do it.
 	double DPS() const
 	{
-	// RESCALED with the slower climb: a hold is now ten seconds rather than
-	// four, so the per-band rates come down or a full burn would delete a
-	// Cyberdemon on its own. Full burn is ~2240 damage, of which the top
-	// band alone is 1000.
+	// SEVEN RUNGS, roughly x1.57 apart. A tier-1 gun only ever sees the
+	// first; a tier-7 gun climbs all of them inside one ten-second hold.
+	//
+	// The ratio matters more than the numbers. Each rung being half again as
+	// hard as the last is what keeps the top of a full ladder feeling like a
+	// different weapon rather than a slightly better one -- 900 against 60 is
+	// fifteen times, and it is reached by the same trigger pull.
 		switch (Band())
 		{
 			case 0:  return 60.0;
-			case 1:  return 100.0;
-			case 2:  return 170.0;
-			case 3:  return 290.0;
-			default: return 500.0;
+			case 1:  return 95.0;
+			case 2:  return 150.0;
+			case 3:  return 235.0;
+			case 4:  return 370.0;
+			case 5:  return 580.0;
+			default: return 900.0;
 		}
 	}
 
@@ -397,20 +451,30 @@ class LNC_Lance : Weapon
 		return Color(255, int(r * 255), int(g * 255), int(b * 255));
 	}
 
-	// ONE HUE FOR THE WHOLE WEAPON, drifting slowly.
+	// SEVEN COLOURS, ONE PER RUNG. The hue no longer drifts on a timer --
+	// colour now carries INFORMATION, and a number that means something must
+	// not also be wandering on its own.
 	//
-	// SLOW, not fast. A quick cycle makes a solid bar look like it is
-	// flickering or strobing, which reads as instability rather than as
-	// colour -- the beam stops looking like one object. A slow drift lets
-	// the beam be unmistakably SOLID at any instant while still never
-	// sitting on one colour.
+	// Read two ways at once, which is the point: within a burst it tells you
+	// how hot you are, and across a run it tells you how far up the ladder
+	// your gun has come. A tier-1 player only ever sees deep blue. Seeing
+	// magenta at all means somebody is carrying a fully built Lance.
 	//
-	// Saturation falls as it heats, so the top band runs pale and hot rather
-	// than merely a different hue.
+	// Cold end to hot end, and deliberately not a single ramp -- green in
+	// the middle breaks blue-to-red into two halves so adjacent rungs are
+	// never nearly the same colour.
 	Color CoreColor() const
 	{
-		return LNC_Lance.HueCol(Level.maptime * 0.006,
-			0.92 - 0.30 * Charge(), 1.0);
+		switch (Band())
+		{
+			case 0:  return 0x2050FF;   // deep electric blue
+			case 1:  return 0x00D8FF;   // cyan
+			case 2:  return 0x40FF80;   // green
+			case 3:  return 0xFFF0A0;   // pale gold
+			case 4:  return 0xFFA020;   // amber
+			case 5:  return 0xFF3A10;   // furnace
+			default: return 0xFF40FF;   // magenta: the top of the ladder
+		}
 	}
 
 	// Deliberately NOT a lighter version of the core. The spiral should be a
@@ -418,18 +482,13 @@ class LNC_Lance : Weapon
 	// chords read as separate at speed is if they are a different colour.
 	// The top band's magenta on furnace-red is the loudest thing the weapon
 	// ever does, which is correct: it is also the most dangerous.
-	// THE SAME HUE AS THE CORE, only paler.
-	//
-	// It used to be the complement -- magenta over furnace-red and so on --
-	// on the theory that contrast would make the spiral read as a separate
-	// object. It did, and that was the bug: it looked like two unrelated
-	// weapons firing down the same line rather than one beam with a filament
-	// wound round it. A small hue offset and a lift toward white keeps it
-	// legible against the core while staying obviously part of it.
+	// THE CORE'S OWN COLOUR, LIFTED TOWARD WHITE. Not a contrasting hue: the
+	// stirred core and the filament are one object with the sheath, and
+	// giving the inner layers their own colour made them look like two
+	// unrelated weapons firing down the same line.
 	Color HelixColor() const
 	{
-		return LNC_Lance.HueCol(Level.maptime * 0.006 + 0.06,
-			0.45 - 0.20 * Charge(), 1.0);
+		return LNC_Lance.LerpCol(CoreColor(), 0xFFFFFF, 0.55);
 	}
 
 	// ---- the beam ------------------------------------------------------
@@ -779,9 +838,22 @@ class LNC_Lance : Weapon
 			return;
 		}
 
-		if (!firing && heat > 0.0)
+		// GRACE FIRST, THEN FALL. graceLeft is refilled every tic the beam is
+		// live, so it only starts counting down once the trigger is actually
+		// up -- which means a burst-pause-burst rhythm keeps its rung, and
+		// walking away from the fight loses it.
+		if (firing)
+		{
+			graceLeft = LNC_HEAT_GRACE;
+		}
+		else if (graceLeft > 0)
+		{
+			graceLeft--;
+		}
+		else if (heat > 0.0)
 		{
 			heat = max(0.0, heat - LNC_HEAT_FALL / 35.0);
+			if (heat <= 0.0) lastBand = 0;
 		}
 	}
 

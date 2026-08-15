@@ -38,3 +38,30 @@ Model LNC_LanceOffhand
 	FrameIndex PLSF A 0 3
 	FrameIndex PLSF B 0 4
 }
+
+// THE DROPPED CORE IS THE GUN ITSELF.
+//
+// There is no Bolter pickup SPRITE anywhere in the art source -- the
+// meatgrinder set has only the HUD frames, which this same model replaces.
+// Rather than substitute a plasma-rifle pickup that looks like a different
+// weapon, the pickup class wears the model: what is lying on the floor is
+// visibly the thing you are about to weld into your own gun.
+//
+// SCALE X IS POSITIVE here, unlike the two weapon entries above. Those are
+// negative to mirror the mesh for the hand it is held in; a pickup lying in
+// the world has no hand and mirroring it would just make the receiver face
+// the wrong way.
+//
+// RollOffset lays it on its side so it reads as dropped rather than
+// hovering at attention. The slow spin is done in ZScript (LNC_LanceCore's
+// Tick) rather than here, since MODELDEF has no way to animate a rotation.
+Model LNC_LanceCore
+{
+	Path "models/Bolter"
+	Model 0 "Bolter.md3"
+	Skin 0 "bolter.png"
+	Scale 0.9 0.9 0.9
+	ZOffset 4
+	RollOffset 90
+	FrameIndex PLAS A 0 0
+}
