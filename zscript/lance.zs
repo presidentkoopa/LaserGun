@@ -230,9 +230,9 @@ class LNC_Lance : Weapon
 	// picked up afterwards adds a rung, to a maximum of LNC_MAX_TIER.
 	// ---- THE ARSENAL'S POWER, IN ONE PLACE -------------------------------
 	//
-	// Read by the Lance and the Lash alike, so the two weapons always show
-	// the same colour for the same strength. "Same colours means stronger"
-	// only works if there is one number behind it.
+	// Read by both hands, so the pair always shows the same colour for the
+	// same strength. "Same colours means stronger" only works if there is one
+	// number behind it.
 	//
 	// Three inputs, in order:
 	//
@@ -380,6 +380,12 @@ class LNC_Lance : Weapon
 	// that used to be spare are the cook glow, one per hand.
 	int SlotBase() { return BeamSlot() == 1 ? 3 : 0; }
 	int CookSlot() { return BeamSlot() == 1 ? 7 : 6; }
+
+	// The frame-global beam count, covering every slot above. One owner for
+	// the whole mod -- SetBeamCount is a single value for the scene, so two
+	// callers disagreeing means whoever writes last shrinks the other out of
+	// existence. Never pass a literal; pass this.
+	const LNC_BEAM_COUNT = 8;
 
 	// ---- THE COOK -------------------------------------------------------
 	//
@@ -615,9 +621,9 @@ class LNC_Lance : Weapon
 	// Cold end to hot end, and deliberately not a single ramp -- green in
 	// the middle breaks blue-to-red into two halves so adjacent rungs are
 	// never nearly the same colour.
-	// STATIC, so the Lash can call it. "Same colours means stronger" only
-	// holds if there is literally one table -- two copies would drift the
-	// first time either was tuned.
+	// STATIC, so anything that wants the ladder can read it without owning a
+	// Lance. "Same colours means stronger" only holds if there is literally
+	// one table -- two copies would drift the first time either was tuned.
 	static Color BandColor(int band)
 	{
 		switch (band)
@@ -791,14 +797,17 @@ class LNC_Lance : Weapon
 		// vec4s in the viewpoint block, not arrays. If a second beam user
 		// ever exists, these want one owner rather than each actor stomping
 		// the others every tic.
-		// SIX: three layers per hand, contiguous. Slots are zeroed on release
-		// rather than left holding stale endpoints, or a holstered hand's
-		// beam would keep being drawn.
-		// The shared count -- see LNC_Whip.BEAM_COUNT_SHARED, currently 64.
-		// This is frame-global, so if the three weapons disagree the last one
-		// to write each tic shrinks the others out of existence. Never write a
-		// literal here; take the constant.
-		level.SetBeamCount(LNC_Whip.BEAM_COUNT_SHARED, 0.28, 1.0);
+		// EIGHT: three layers per hand (0-5) plus a cook glow per hand (6-7).
+		//
+		// It was 64 while the Lash held 8-15 and the buckler 16-63. Both are
+		// gone, and this number is what the shader loops to -- a slot below
+		// the count still pays a bounding-sphere test per pixel even when it
+		// is zeroed, so leaving it at 64 would have bought fifty-six dead
+		// tests on every fragment of every frame.
+		//
+		// Slots are zeroed on release rather than left holding stale
+		// endpoints, or a holstered hand's beam would keep being drawn.
+		level.SetBeamCount(LNC_BEAM_COUNT, 0.28, 1.0);
 
 		level.SetBeamLook(
 			0.45 + 0.55 * charge,         // air glow
@@ -1170,16 +1179,11 @@ class LNC_LaserMarine : DoomPlayer
 		// type at all, so they would be granted and then left sitting
 		// unequipped behind the pistol.
 		//
-		// THE LASH COMES ALONG BUT NOT IN A HAND. Both it and the offhand
-		// Lance want the one offhand slot, and the gun wins -- the whip is
-		// still experimental. It is on slot 6 whenever it is wanted.
-		//
 		// Their beams do not collide -- the Lances draw in slots 0-5 with
-		// their cook glows in 6-7, the Lash in 8-15, and all of them ask for
-		// the same frame-global beam count.
+		// their cook glows in 6-7, and both ask for the same frame-global
+		// beam count.
 		A_GiveInventory("LNC_Lance", 1);
 		A_GiveInventory("LNC_LanceOffhand", 1);
-		A_GiveInventory("LNC_Whip", 1);
 		if (CountInv("LNC_LanceTier") < 1)
 			A_GiveInventory("LNC_LanceTier", 1);
 

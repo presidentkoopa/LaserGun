@@ -122,15 +122,7 @@ class LNC_LanceCore : CustomInventory
 			// in the backpack -- an offhand weapon that has to be manually
 			// selected reads as not having been given at all.
 			//
-			// THIS TAKES THE LASH'S HAND. Both are offhand weapons and there
-			// is only one offhand, so seating the second Lance displaces the
-			// whip. That is the right default -- the second gun is the power
-			// spike and doubles your damage on a single target -- but it must
-			// not happen silently, or a whip that was hanging there a moment
-			// ago has simply vanished with no explanation. Hence the second
-			// line: the Lash is not gone, it is in the other pocket.
 			A_GiveInventory("LNC_LanceOffhand", 1);
-			bool hadLash = CountInv("LNC_Whip") > 0;
 			if (player)
 			{
 				let off = Weapon(FindInventory("LNC_LanceOffhand"));
@@ -139,8 +131,6 @@ class LNC_LanceCore : CustomInventory
 			A_Print(String.Format(
 				"SECOND LANCE -- dual wield, tier %d of %d",
 				after, LNC_Lance.LNC_MAX_TIER));
-			if (hadLash)
-				A_Print("The Lash is stowed -- slot 6 to bring it back");
 			return;
 		}
 

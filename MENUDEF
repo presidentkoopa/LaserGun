@@ -14,7 +14,7 @@ OptionMenu "LNCOptions"
 {
 	Title "Laser Arsenal"
 	StaticText ""
-	StaticText "Lance / Lash progression", gold
+	StaticText "Lance progression", gold
 	Option "Mode", "lnc_progression", "LNCProgression"
 	StaticText ""
 	StaticText "Heat drives the climb either way. This only sets", darkgray
