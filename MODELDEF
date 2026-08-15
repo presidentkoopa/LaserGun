@@ -1,0 +1,40 @@
+// MODELDEF binds by CLASS NAME, so the offhand copy needs its own block
+// even though it is the identical model, skin, scale and offsets. That is
+// also why RS_Main carries six of these -- one per tier variant.
+//
+// Scale X is NEGATIVE (-1.1) on purpose: it mirrors the model. The Bolter
+// mesh is built for the other hand, and mirroring is cheaper and more
+// reliable than re-exporting it.
+//
+// The frame indices below are what let the states drive the model: PLSC A/B/C
+// and PLSF A/B are the sprite names the Ready / Overheated / Beam states use,
+// each mapped to a mesh frame. The sprites themselves still have to exist as
+// lumps even though the model replaces them.
+
+Model LNC_Lance
+{
+	Path "models/Bolter"
+	Model 0 "Bolter.md3"
+	Skin 0 "bolter.png"
+	Scale -1.1 1.1 1.1
+	ZOffset -6
+	FrameIndex PLSC A 0 0
+	FrameIndex PLSC B 0 1
+	FrameIndex PLSC C 0 2
+	FrameIndex PLSF A 0 3
+	FrameIndex PLSF B 0 4
+}
+
+Model LNC_LanceOffhand
+{
+	Path "models/Bolter"
+	Model 0 "Bolter.md3"
+	Skin 0 "bolter.png"
+	Scale -1.1 1.1 1.1
+	ZOffset -6
+	FrameIndex PLSC A 0 0
+	FrameIndex PLSC B 0 1
+	FrameIndex PLSC C 0 2
+	FrameIndex PLSF A 0 3
+	FrameIndex PLSF B 0 4
+}
