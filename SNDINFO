@@ -11,3 +11,23 @@ lnc/loop      PLALTF
 lnc/cookoff   PLCOUT
 lnc/empty     AKEMPT
 lnc/sizzle    AKEMPT
+
+// ---- burning deaths -------------------------------------------------
+//
+// TWO $random GROUPS, THREE TAKES EACH, and the pyre rolls which group as
+// well as letting the engine roll within it -- so six distinct screams,
+// picked twice over, plus a per-play pitch shift of +/-12%. A room of
+// burning zombies is a chorus instead of one sound played six times.
+$random lnc/burn/scream1 { lnc/burn/zob1 lnc/burn/zob2 lnc/burn/zob3 }
+$random lnc/burn/scream2 { lnc/burn/zom1 lnc/burn/zom2 lnc/burn/zom3 }
+
+lnc/burn/zob1   BURNZOB1
+lnc/burn/zob2   BURNZOB2
+lnc/burn/zob3   BURNZOB3
+lnc/burn/zom1   BURNZOM1
+lnc/burn/zom2   BURNZOM2
+lnc/burn/zom3   BURNZOM3
+
+// The crackle under it all, looped on CHAN_BODY for the pyre's lifetime
+// and stopped explicitly when it burns out.
+lnc/burn/loop   DSFLAME
