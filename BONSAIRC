@@ -1,0 +1,17 @@
+# GunBonsai configuration for the Lance.
+#
+# Harmless when GunBonsai is not loaded -- the lump is simply never read.
+#
+# WHY THIS IS NEEDED. GunBonsai autodetects a weapon's type by inspecting
+# the damage event (TFLV_WeaponInfo.InferWeaponTypeFromDamage), looking at
+# whether the inflictor was a missile, a puff, and so on. The Lance is a
+# beam: it deals damage directly with DamageMobj and no projectile and no
+# puff exists to inspect, so autodetection has nothing to go on and will
+# guess. A wrong guess means the wrong upgrade pool is offered -- projectile
+# upgrades on a hitscan weapon do nothing, which is the "cards offered,
+# taken, silently inert" failure this project has hit before.
+#
+# HITSCAN is the honest answer: the damage is instant along a ray, which is
+# what every hitscan upgrade assumes. It is not "the beam is a bullet".
+
+type LNC_Lance LNC_LanceOffhand : HITSCAN ;

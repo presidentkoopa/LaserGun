@@ -93,6 +93,37 @@ class LNC_Lance : Weapon
 	// lives so the rate comes out exact rather than truncated to nothing.
 	double burn;
 
+	// THE SACRED POINTER, for GunBonsai.
+	//
+	// GunBonsai decides WHICH WEAPON earned the XP by reading
+	// evt.inflictor.master -- the pointer every projectile in RS_Main sets
+	// to the weapon that fired it. A beam has no projectile, so the burn
+	// would otherwise pass the player pawn as its own inflictor, whose
+	// master is null, and GunBonsai would fall back to ReadyWeapon.
+	//
+	// That is right for the mainhand and WRONG for the offhand: an offhand
+	// Lance would quietly feed all its XP to whatever is in the other hand.
+	//
+	// So each Lance keeps one invisible marker whose master is itself, and
+	// hands that to DamageMobj as the inflictor. One actor per weapon, made
+	// once and reused for the life of the gun -- not one per damage tick,
+	// which at this cadence would be dozens of actors a second.
+	//
+	// It is also placed at the player before each burn so knockback still
+	// pushes away from the shooter rather than from wherever it was last.
+	LNC_BeamInflictor tag;
+
+	LNC_BeamInflictor GetTag(Actor from)
+	{
+		if (!tag)
+		{
+			tag = LNC_BeamInflictor(Spawn("LNC_BeamInflictor", from.Pos));
+			if (tag) tag.master = self;
+		}
+		if (tag) tag.SetOrigin(from.Pos, false);
+		return tag;
+	}
+
 	// GEAR-CHANGE PUNCH. Crossing into a new band is the most important
 	// thing that happens to this weapon while you hold it, and a colour
 	// swap alone is easy to miss when you are looking at what you are
@@ -638,7 +669,13 @@ class LNC_Lance : Weapon
 		// DMG_NO_PAIN, or a held beam pins a monster in its pain state
 		// permanently and it never acts again -- which trivialises every
 		// fight and looks broken besides. It still bleeds and still dies.
-		victim.DamageMobj(self, self, whole, 'Hitscan', DMG_NO_PAIN);
+		// INFLICTOR IS THE WEAPON'S MARKER, SOURCE IS THE PLAYER. GunBonsai
+		// reads inflictor.master to work out which hand earned the XP; the
+		// player stays the source so kill credit, infighting and the burn
+		// handler's own "did a Lance kill this" test all still resolve to
+		// the shooter.
+		let tg = w.GetTag(self);
+		victim.DamageMobj(tg ? Actor(tg) : self, self, whole, 'Hitscan', DMG_NO_PAIN);
 
 		if (Random(0, 11) == 0)
 			A_StartSound("lnc/sizzle", CHAN_AUTO, CHANF_DEFAULT, 0.3);

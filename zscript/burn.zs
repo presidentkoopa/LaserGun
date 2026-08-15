@@ -352,3 +352,34 @@ class LNC_Burned : Inventory
 		+INVENTORY.UNTOSSABLE
 	}
 }
+
+
+// ---------------------------------------------------------------------
+// LNC_BeamInflictor -- an invisible marker, one per Lance, whose `master`
+// points back at the weapon that owns it.
+//
+// EXISTS ONLY TO BE A POINTER. GunBonsai attributes XP by reading
+// evt.inflictor.master, a convention every projectile weapon satisfies for
+// free because its rounds are real actors. A beam has no round, so this
+// stands in for one: it is never drawn, never collides, never moves under
+// its own power, and is repositioned onto the player just before each
+// burn so knockback still pushes away from the shooter.
+//
+// NOINTERACTION rather than merely invisible -- it must not tick physics,
+// must not be a target, and must never appear in an iterator.
+// ---------------------------------------------------------------------
+class LNC_BeamInflictor : Actor
+{
+	Default
+	{
+		+NOBLOCKMAP
+		+NOGRAVITY
+		+NOINTERACTION
+		+DONTSPLASH
+		+NOTELEPORT
+		RenderStyle "None";
+		Radius 1;
+		Height 1;
+	}
+	States { Spawn: TNT1 A -1; Stop; }
+}
